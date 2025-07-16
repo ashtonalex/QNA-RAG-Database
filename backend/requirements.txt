@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+pypdf
+python-docx
+pytesseract
+pillow
+pydantic
+celery
+redis
+python-magic
+langdetect 
