@@ -6,7 +6,6 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import tiktoken
-from functools import lru_cache
 import asyncio
 
 
@@ -83,7 +82,7 @@ class ChunkingService:
     async def hybrid_chunk(self, text: str, metadata: Dict) -> List[Chunk]:
         """
         Perform hybrid chunking (syntactic first, then semantic grouping, then overlap).
-        Returns a list of Chunk objects.
+        Returns a list of Chunk objects with propagated metadata.
         """
         if not text or not isinstance(text, str):
             return []
@@ -95,8 +94,10 @@ class ChunkingService:
             # Each syntactic chunk may contain multiple sentences
             grouped = await self.semantic_chunk(chunk)
             semantic_chunks.extend(grouped)
-        # Step 3: Overlap logic
-        overlapped_chunks = await self.create_overlapping_chunks(semantic_chunks)
+        # Step 3: Overlap logic with metadata propagation
+        overlapped_chunks = await self.create_overlapping_chunks(
+            semantic_chunks, base_metadata=metadata
+        )
         return overlapped_chunks
 
     def syntactic_chunk(self, text: str, metadata: Dict) -> List[str]:
@@ -170,15 +171,18 @@ class ChunkingService:
         else:
             return max(0.0, (max_tokens - (token_count - max_tokens)) / max_tokens)
 
-    async def create_overlapping_chunks(self, chunks: List[str]) -> List[Chunk]:
+    async def create_overlapping_chunks(
+        self, chunks: List[str], base_metadata: Dict = None
+    ) -> List[Chunk]:
         """
         Add overlap between chunks for context preservation.
-        Returns a list of Chunk objects with overlap.
+        Returns a list of Chunk objects with overlap and propagated metadata.
         """
         if not chunks:
             return []
         overlap_size = max(1, int(self.config.overlap * self.config.chunk_size))
         overlapped_chunks = []
+        base_metadata = base_metadata or {}
         for i, chunk_text in enumerate(chunks):
             # Get previous chunk's tail for overlap
             if i > 0 and overlap_size > 0:
@@ -192,10 +196,12 @@ class ChunkingService:
             # Use async token count cache
             token_count = await self._cached_count_tokens(chunk_text)
             quality_score = self._score_chunk(token_count)
+            # Merge base metadata with chunk-specific metadata
+            chunk_metadata = {"index": i + 1, **base_metadata}
             chunk = Chunk(
                 id=f"chunk_{i + 1}",
                 text=chunk_text,
-                metadata={"index": i + 1},
+                metadata=chunk_metadata,
                 token_count=token_count,
                 quality_score=quality_score,
                 relationships={
