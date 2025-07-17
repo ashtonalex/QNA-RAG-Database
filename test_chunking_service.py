@@ -24,6 +24,29 @@ async def test_chunk_document_and_vector_payloads():
     assert all(isinstance(p["text"], str) for p in payloads2)
 
 
+@pytest.mark.asyncio
+async def test_chunk_document_metadata_propagation():
+    text = (
+        "Section 1: Introduction. This is the first paragraph. It has two sentences.\n\n"
+        "Section 2: Methods. A completely unrelated topic starts here. It is about something else entirely.\n\n"
+        "Section 3: Results. Back to the original topic. This sentence is similar to the first paragraph."
+    )
+    config = ChunkingConfig(chunk_size=50, overlap=0.1, strategy="hybrid")
+    metadata = {"page_number": 1, "section_header": "Introduction"}
+    chunks = await chunk_document(text, config, metadata)
+    assert len(chunks) > 0
+    for chunk in chunks:
+        # Metadata should be present and include propagated fields
+        assert "page_number" in chunk.metadata
+        assert "section_header" in chunk.metadata
+        assert "index" in chunk.metadata
+        assert chunk.relationships is not None
+        assert "prev" in chunk.relationships and "next" in chunk.relationships
+        assert isinstance(chunk.token_count, int)
+        assert chunk.quality_score is not None
+        assert chunk.text
+
+
 # --- Manual/demo code from main branch ---
 from backend.app.services.chunking_service import ChunkingService
 
@@ -35,6 +58,7 @@ sample_text = (
     "Section 3: Results. Back to the original topic. This sentence is similar to the first paragraph."
 )
 
+
 def get_mock_metadata(index):
     if index < 2:
         return {"page_number": 1, "section_header": "Introduction", "order": index + 1}
@@ -44,10 +68,8 @@ def get_mock_metadata(index):
         return {"page_number": 3, "section_header": "Results", "order": index + 1}
 
 
-
 config = ChunkingConfig(chunk_size=100)
 chunker = ChunkingService(config)
-
 
 
 def print_chunk_info(chunks):
@@ -60,11 +82,11 @@ def print_chunk_info(chunks):
         print(f"  Relationships: {getattr(chunk, 'relationships', None)}")
         print()
 
+
 if __name__ == "__main__":
     print("Testing Syntactic Chunking:")
     syntactic_chunks = chunker.syntactic_chunk(sample_text, metadata={})
     for i, chunk_text in enumerate(syntactic_chunks):
-
         print(f"Syntactic Chunk {i + 1}: {chunk_text}")
     print()
 
@@ -81,7 +103,6 @@ if __name__ == "__main__":
 
     print("Testing Hybrid Chunking (with overlap and metadata):")
 
-
     async def test_hybrid():
         # Hybrid chunking returns Chunk objects
         hybrid_chunks = await chunker.hybrid_chunk(sample_text, metadata={})
@@ -91,4 +112,3 @@ if __name__ == "__main__":
         print_chunk_info(hybrid_chunks)
 
     asyncio.run(test_hybrid())
-
