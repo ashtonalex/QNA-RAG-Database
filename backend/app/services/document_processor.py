@@ -13,6 +13,10 @@ import aiofiles
 import logging
 import redis
 import inspect
+from backend.app.models.chunk_models import ChunkingConfig
+import mimetypes
+import docx
+from pypdf import PdfReader
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -56,7 +60,31 @@ EXTENSION_MAPPING = {
 
 
 class DocumentProcessor:
+    # Mapping from MIME type to ChunkingConfig
+    CHUNKING_CONFIGS = {
+        "application/pdf": ChunkingConfig(
+            chunk_size=500, overlap=0.1, strategy="hybrid"
+        ),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ChunkingConfig(
+            chunk_size=400, overlap=0.15, strategy="hybrid"
+        ),
+        "text/plain": ChunkingConfig(chunk_size=300, overlap=0.2, strategy="syntactic"),
+        # To add a new document type, add a new MIME type and ChunkingConfig here.
+    }
+
+    @classmethod
+    def get_chunking_config_for_type(cls, filetype: str) -> ChunkingConfig:
+        """
+        Return the ChunkingConfig for a given MIME type, or a default config if not found.
+        Extend CHUNKING_CONFIGS to support new document types.
+        """
+        return cls.CHUNKING_CONFIGS.get(filetype, ChunkingConfig())
+
     def __init__(self):
+        """
+        DocumentProcessor handles file upload, validation, text extraction, chunking, and storage.
+        Uses per-document-type chunking configuration for flexible processing.
+        """
         # Initialize storage paths
         self.upload_dir = Path("temp_uploads")
         self.upload_dir.mkdir(exist_ok=True)
@@ -77,10 +105,51 @@ class DocumentProcessor:
 
         logger.info("DocumentProcessor initialized")
 
+    async def _extract_text_from_file(self, filepath: str, filetype: str) -> str:
+        """
+        Extract text from a file based on its MIME type.
+        Supports PDF, DOCX, and TXT. Extend this method to support more types.
+        """
+        if filetype == "application/pdf":
+            try:
+                reader = PdfReader(filepath)
+                text = "\n".join([page.extract_text() or "" for page in reader.pages])
+                return text
+            except Exception as e:
+                logger.error(f"PDF extraction failed: {e}")
+                return ""
+        elif (
+            filetype
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
+            try:
+                doc = docx.Document(filepath)
+                text = "\n".join([para.text for para in doc.paragraphs])
+                return text
+            except Exception as e:
+                logger.error(f"DOCX extraction failed: {e}")
+                return ""
+        elif filetype == "text/plain":
+            try:
+                async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
+                    return await f.read()
+            except Exception as e:
+                logger.error(f"TXT extraction failed: {e}")
+                return ""
+        else:
+            logger.warning(f"Unsupported file type for extraction: {filetype}")
+            return ""
+
     async def handle_upload(self, file: UploadFile) -> str:
         """
-        Handle async file upload, validate, and save to temp storage.
-        Returns a unique document/task ID.
+        Handle async file upload, validation, text extraction, chunking, and chunk storage.
+        Pipeline:
+        1. Validate and save file
+        2. Select chunking config based on file type
+        3. Extract text from file
+        4. Chunk text using async chunking service
+        5. Store resulting chunks in Redis
+        Returns document ID.
         """
         try:
             # Generate unique document ID
@@ -103,6 +172,12 @@ class DocumentProcessor:
                 raise HTTPException(status_code=400, detail="Filename is required")
             filename = file.filename
             detected_type = await self._validate_file_type(content, filename)
+
+            # Select chunking config for this document type
+            chunking_config = self.get_chunking_config_for_type(detected_type)
+            logger.info(
+                f"Selected chunking config for {detected_type}: {chunking_config}"
+            )
 
             # (Stub) Malware check
             await self._check_malware(content, doc_id)
@@ -139,6 +214,25 @@ class DocumentProcessor:
             logger.info(
                 f"File uploaded successfully: {doc_id}, type: {detected_type}, size: {len(content)} bytes"
             )
+
+            # Extract text from file
+            extracted_text = await self._extract_text_from_file(filepath, detected_type)
+            logger.info(f"Extracted text length: {len(extracted_text)}")
+
+            # Chunk the extracted text
+            from backend.app.services.chunking_service import ChunkingService
+
+            chunker = ChunkingService(chunking_config)
+            chunks = await chunker.hybrid_chunk(extracted_text, metadata={})
+            logger.info(
+                f"Chunked into {len(chunks)} chunks. Sample: {chunks[0].text if chunks else 'No chunks'}"
+            )
+
+            # Store chunks in Redis
+            self._store_chunks(doc_id, chunks)
+
+            # Track progress: extraction done
+            self.track_progress(doc_id, status="processing", progress=75)
 
             # Simulate extraction step (replace with actual extraction logic as needed)
             try:
@@ -406,3 +500,14 @@ class DocumentProcessor:
         self.redis.delete(f"doc_meta:{doc_id}")
         self.redis.delete(f"doc_progress:{doc_id}")
         self.redis.srem("doc_ids", doc_id)
+
+    def _store_chunks(self, doc_id: str, chunks: list) -> None:
+        """
+        Store the list of chunk dicts in Redis under 'doc_chunks:{doc_id}'.
+        Chunks are serialized as strings for persistence.
+        """
+        chunk_dicts = [chunk.dict() for chunk in chunks]
+        self.redis.delete(f"doc_chunks:{doc_id}")  # Remove any existing
+        if chunk_dicts:
+            self.redis.rpush(f"doc_chunks:{doc_id}", *[str(cd) for cd in chunk_dicts])
+        logger.info(f"Stored {len(chunk_dicts)} chunks for doc {doc_id}")
