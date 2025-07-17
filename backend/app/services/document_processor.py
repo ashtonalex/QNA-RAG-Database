@@ -116,6 +116,25 @@ class DocumentProcessor:
             # Calculate file hash
             file_hash = hashlib.sha256(content).hexdigest()
 
+            # Store metadata in Redis
+            import datetime
+
+            metadata = {
+                "id": doc_id,
+                "filename": filename,
+                "filetype": detected_type,
+                "size": len(content),
+                "created_at": datetime.datetime.utcnow().isoformat(),
+                "author": None,
+                "word_count": None,
+                "language": None,
+                "headings": None,
+                "tables": None,
+                "hash": file_hash,
+            }
+            self.redis.hmset(f"doc_meta:{doc_id}", metadata)
+            self.redis.sadd("doc_ids", doc_id)
+
             logger.info(
                 f"File uploaded successfully: {doc_id}, type: {detected_type}, size: {len(content)} bytes"
             )
@@ -406,3 +425,53 @@ class DocumentProcessor:
             raise HTTPException(
                 status_code=500, detail="Failed to extract text from TXT."
             )
+
+    def list_documents(self):
+        """
+        List all document metadata.
+        """
+        doc_ids = self.redis.smembers("doc_ids")
+        docs = []
+        for doc_id in doc_ids:
+            meta = self.redis.hgetall(f"doc_meta:{doc_id}")
+            if meta:
+                # Convert fields to correct types
+                if "size" in meta:
+                    meta["size"] = int(meta["size"])
+                if "created_at" in meta:
+                    from datetime import datetime
+
+                    meta["created_at"] = datetime.fromisoformat(meta["created_at"])
+                docs.append(meta)
+        return docs
+
+    def get_document_metadata(self, doc_id: str):
+        """
+        Get metadata for a specific document.
+        """
+        meta = self.redis.hgetall(f"doc_meta:{doc_id}")
+        if not meta:
+            return None
+        if "size" in meta:
+            meta["size"] = int(meta["size"])
+        if "created_at" in meta:
+            from datetime import datetime
+
+            meta["created_at"] = datetime.fromisoformat(meta["created_at"])
+        return meta
+
+    def delete_document(self, doc_id: str):
+        """
+        Delete document file, metadata, and progress.
+        """
+        # Remove file
+        meta = self.redis.hgetall(f"doc_meta:{doc_id}")
+        if meta and "filename" in meta:
+            safe_filename = self._sanitize_filename(meta["filename"])
+            filepath = self.upload_dir / f"{doc_id}_{safe_filename}"
+            if filepath.exists():
+                filepath.unlink()
+        # Remove metadata and progress
+        self.redis.delete(f"doc_meta:{doc_id}")
+        self.redis.delete(f"doc_progress:{doc_id}")
+        self.redis.srem("doc_ids", doc_id)
