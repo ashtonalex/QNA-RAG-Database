@@ -39,11 +39,12 @@ def test_extract_pdf_text(mock_pdfreader, mock_exists, tmp_path, processor):
 def test_extract_pdf_image_based(
     mock_ocrservice, mock_pdfreader, mock_exists, tmp_path, processor
 ):
-    # Mock a PDF with no extractable text (image-based)
-    mock_ocr = mock_ocrservice.return_value
+    # Patch the ocr_service attribute directly
+    mock_ocr = MagicMock()
     mock_ocr.is_image_pdf.return_value = True
     mock_ocr.pdf_to_images.return_value = [MagicMock(), MagicMock()]
     mock_ocr.run_ocr.side_effect = [("Scanned text 1", 0.9), ("Scanned text 2", 0.9)]
+    processor.ocr_service = mock_ocr
     result = processor._extract_pdf("backend/app/services/dummy.pdf")
     assert "Scanned text 1" in result
     assert "Scanned text 2" in result

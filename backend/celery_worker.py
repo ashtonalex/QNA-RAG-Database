@@ -1,15 +1,16 @@
+import os
+import ssl
+from celery import Celery
+from dotenv import load_dotenv
+
 """
 Celery worker entry point for background document processing tasks.
 """
 
-from dotenv import load_dotenv
 
 load_dotenv()
-import os
-import ssl
 
 print("Using Redis URL:", os.environ.get("REDIS_URL"))
-from celery import Celery
 
 celery_app = Celery(
     "worker",
