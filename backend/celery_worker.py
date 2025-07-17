@@ -2,15 +2,24 @@
 Celery worker entry point for background document processing tasks.
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()
 import os
 import ssl
+
+print("Using Redis URL:", os.environ.get("REDIS_URL"))
 from celery import Celery
 
-redis_url = os.getenv("REDIS_URL", "")
-celery_app = Celery("document_processor", broker=redis_url, backend=redis_url)
+celery_app = Celery(
+    "worker",
+    broker=os.environ.get("REDIS_URL"),
+    backend=os.environ.get("REDIS_URL"),
+)
 
 # Secure rediss:// support for Upstash
-if redis_url.startswith("rediss://"):
+redis_url = os.environ.get("REDIS_URL")
+if redis_url and redis_url.startswith("rediss://"):
     celery_app.conf.broker_use_ssl = {"ssl_cert_reqs": ssl.CERT_NONE}
     celery_app.conf.redis_backend_use_ssl = {"ssl_cert_reqs": ssl.CERT_NONE}
 

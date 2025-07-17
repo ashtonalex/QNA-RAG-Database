@@ -62,6 +62,11 @@ class DocumentProcessor:
         # Initialize magic number detector
         self.magic_detector = magic.Magic(mime=True)
 
+        # Initialize OCR service
+        from backend.app.services.ocr_service import OCRService
+
+        self.ocr_service = OCRService()
+
         logger.info("DocumentProcessor initialized")
 
     async def handle_upload(self, file: UploadFile) -> str:
@@ -283,16 +288,26 @@ class DocumentProcessor:
 
     def _extract_pdf(self, filepath: str) -> str:
         """
-        Extract text from a PDF file using pypdf.
+        Extract text from a PDF file using pypdf or OCR if image-based.
         """
         from pypdf import PdfReader
 
         try:
-            reader = PdfReader(filepath)
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() or ""
-            return text
+            # Check if image-based PDF
+            if self.ocr_service.is_image_pdf(filepath):
+                # Convert PDF pages to images
+                images = self.ocr_service.pdf_to_images(filepath)
+                text = ""
+                for image in images:
+                    page_text, _ = self.ocr_service.run_ocr(image)
+                    text += page_text + "\n"
+                return text
+            else:
+                reader = PdfReader(filepath)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() or ""
+                return text
         except Exception as e:
             logger.error(f"PDF extraction failed: {e}")
             raise HTTPException(
