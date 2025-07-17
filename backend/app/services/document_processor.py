@@ -12,6 +12,7 @@ from pathlib import Path
 import aiofiles
 import logging
 import redis
+import ssl
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -72,8 +73,7 @@ class DocumentProcessor:
         self.redis = redis.Redis.from_url(
             os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             decode_responses=True,
-            ssl=True,
-            ssl_cert_reqs=None,
+            ssl_cert_reqs=ssl.CERT_REQUIRED,
         )
 
         logger.info("DocumentProcessor initialized")
