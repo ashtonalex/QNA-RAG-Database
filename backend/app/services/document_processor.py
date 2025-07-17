@@ -11,6 +11,7 @@ from fastapi import UploadFile, HTTPException
 from pathlib import Path
 import aiofiles
 import logging
+import redis
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,9 +64,17 @@ class DocumentProcessor:
         self.magic_detector = magic.Magic(mime=True)
 
         # Initialize OCR service
-        from backend.app.services.ocr_service import OCRService
+        from .ocr_service import OCRService
 
         self.ocr_service = OCRService()
+
+        # Initialize Redis connection
+        self.redis = redis.Redis.from_url(
+            os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+            decode_responses=True,
+            ssl=True,
+            ssl_cert_reqs=None,
+        )
 
         logger.info("DocumentProcessor initialized")
 
@@ -78,6 +87,8 @@ class DocumentProcessor:
             # Generate unique document ID
             doc_id = str(uuid.uuid4())
             logger.info(f"Processing upload for document ID: {doc_id}")
+            # Track progress: upload started
+            self.track_progress(doc_id, status="pending", progress=0)
 
             # Validate file size
             await self._validate_file_size(file)
@@ -87,6 +98,9 @@ class DocumentProcessor:
 
             # Validate file type using magic numbers
             if not file.filename:
+                self.track_progress(
+                    doc_id, status="error", error_message="Filename is required"
+                )
                 raise HTTPException(status_code=400, detail="Filename is required")
             filename = file.filename
             detected_type = await self._validate_file_type(content, filename)
@@ -96,6 +110,8 @@ class DocumentProcessor:
 
             # Save file to temporary storage
             filepath = await self._save_file(content, filename, doc_id)
+            # Track progress: file saved
+            self.track_progress(doc_id, status="processing", progress=25)
 
             # Calculate file hash
             file_hash = hashlib.sha256(content).hexdigest()
@@ -104,10 +120,26 @@ class DocumentProcessor:
                 f"File uploaded successfully: {doc_id}, type: {detected_type}, size: {len(content)} bytes"
             )
 
+            # Simulate extraction step (replace with actual extraction logic as needed)
+            try:
+                # Extraction (e.g., OCR or text extraction)
+                # For demonstration, just call extract_text if you want real extraction
+                # extracted_text = self.extract_text(filepath)
+                # Track progress: extraction done
+                self.track_progress(doc_id, status="processing", progress=75)
+            except Exception as e:
+                self.track_progress(doc_id, status="error", error_message=str(e))
+                raise
+
+            # Track progress: done
+            self.track_progress(doc_id, status="done", progress=100)
             return doc_id
 
         except Exception as e:
             logger.error(f"Error processing upload: {str(e)}")
+            # Track progress: error
+            if "doc_id" in locals():
+                self.track_progress(doc_id, status="error", error_message=str(e))
             raise HTTPException(status_code=400, detail=str(e))
 
     async def _validate_file_size(self, file: UploadFile) -> None:
@@ -242,6 +274,38 @@ class DocumentProcessor:
             name, ext = os.path.splitext(sanitized)
             sanitized = name[:255] + ext
         return sanitized
+
+    def track_progress(
+        self,
+        doc_id: str,
+        status: str,
+        progress: float = None,
+        error_message: str = None,
+    ):
+        """
+        Store or update document processing progress in Redis.
+        """
+        progress_data = {
+            "id": doc_id,
+            "status": status,
+        }
+        if progress is not None:
+            progress_data["progress"] = progress
+        if error_message:
+            progress_data["error_message"] = error_message
+        self.redis.hmset(f"doc_progress:{doc_id}", progress_data)
+
+    def get_progress(self, doc_id: str):
+        """
+        Retrieve document processing progress from Redis.
+        """
+        data = self.redis.hgetall(f"doc_progress:{doc_id}")
+        if not data:
+            return None
+        # Convert progress to float if present
+        if "progress" in data:
+            data["progress"] = float(data["progress"])
+        return data
 
     def detect_format(self, filepath: str) -> str:
         """
