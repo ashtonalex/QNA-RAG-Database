@@ -10,3 +10,9 @@ celery
 redis
 python-magic
 langdetect 
+tiktoken
+sentence-transformers
+nltk
+numpy
+scikit-learn
+spacy 
