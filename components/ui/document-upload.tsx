@@ -1,154 +1,233 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useCallback, useRef } from "react"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Upload, File, Trash2, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { useState, useCallback, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Upload,
+  File,
+  Trash2,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Document {
-  id: string
-  name: string
-  size: number
-  type: string
-  status: "uploading" | "processing" | "completed" | "error"
-  progress: number
-  error?: string
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  status: "uploading" | "processing" | "completed" | "error";
+  progress: number;
+  error?: string;
 }
 
 interface DocumentUploadProps {
-  documents: Document[]
-  onDocumentsChange: (documents: Document[]) => void
+  documents: Document[];
+  onDocumentsChange: (documents: Document[]) => void;
 }
 
-export function DocumentUpload({ documents, onDocumentsChange }: DocumentUploadProps) {
-  const [isDragActive, setIsDragActive] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+export function DocumentUpload({
+  documents,
+  onDocumentsChange,
+}: DocumentUploadProps) {
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Helper to upload a file to the backend
+  const uploadFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    setUploading(true);
+    try {
+      const res = await fetch("/api/documents/upload", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      return data.document_id as string;
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Poll backend for document status
+  const pollStatus = (docId: string) => {
+    let pollInterval: NodeJS.Timeout | null = null;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/documents/${docId}/status`);
+        if (!res.ok) throw new Error("Status check failed");
+        const status = await res.json();
+        onDocumentsChange((prev) =>
+          prev.map((doc) =>
+            doc.id === docId
+              ? {
+                  ...doc,
+                  status:
+                    status.status === "done"
+                      ? "completed"
+                      : status.status === "error"
+                      ? "error"
+                      : status.status === "pending"
+                      ? "uploading"
+                      : "processing",
+                  progress: status.progress ?? doc.progress,
+                  error: status.error_message || undefined,
+                }
+              : doc
+          )
+        );
+        if (status.status === "done" || status.status === "error") {
+          if (pollInterval) clearInterval(pollInterval);
+        }
+      } catch (e) {
+        onDocumentsChange((prev) =>
+          prev.map((doc) =>
+            doc.id === docId
+              ? { ...doc, status: "error", error: "Failed to poll status" }
+              : doc
+          )
+        );
+        if (pollInterval) clearInterval(pollInterval);
+      }
+    };
+    poll();
+    pollInterval = setInterval(poll, 1500);
+  };
 
   const handleFiles = useCallback(
     (files: FileList | null) => {
-      if (!files) return
+      if (!files) return;
 
       const acceptedTypes = [
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "text/plain",
-      ]
-      const maxSize = 10 * 1024 * 1024 // 10MB
+      ];
+      const maxSize = 10 * 1024 * 1024; // 10MB
 
       const validFiles = Array.from(files).filter((file) => {
-        return acceptedTypes.includes(file.type) && file.size <= maxSize
-      })
+        return acceptedTypes.includes(file.type) && file.size <= maxSize;
+      });
 
-      const newDocuments = validFiles.map((file) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        status: "uploading" as const,
-        progress: 0,
-      }))
-
-      onDocumentsChange([...documents, ...newDocuments])
-
-      // Simulate upload and processing
-      newDocuments.forEach((doc) => {
-        simulateUpload(doc.id)
-      })
+      validFiles.forEach(async (file) => {
+        // Add to UI as uploading
+        const tempId = Math.random().toString(36).substr(2, 9);
+        onDocumentsChange((docs) => [
+          ...docs,
+          {
+            id: tempId,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            status: "uploading" as const,
+            progress: 0,
+          },
+        ]);
+        try {
+          const docId = await uploadFile(file);
+          // Replace temp doc with real docId
+          onDocumentsChange((docs) =>
+            docs.map((doc) =>
+              doc.id === tempId
+                ? { ...doc, id: docId, status: "processing", progress: 0 }
+                : doc
+            )
+          );
+          pollStatus(docId);
+        } catch (e: any) {
+          onDocumentsChange((docs) =>
+            docs.map((doc) =>
+              doc.id === tempId
+                ? {
+                    ...doc,
+                    status: "error",
+                    error: e?.message || "Upload failed",
+                  }
+                : doc
+            )
+          );
+        }
+      });
     },
-    [documents, onDocumentsChange],
-  )
-
-  const simulateUpload = (docId: string) => {
-    const updateProgress = (progress: number, status?: Document["status"]) => {
-      onDocumentsChange((prev) =>
-        prev.map((doc) => (doc.id === docId ? { ...doc, progress, ...(status && { status }) } : doc)),
-      )
-    }
-
-    // Simulate upload progress
-    let progress = 0
-    const uploadInterval = setInterval(() => {
-      progress += Math.random() * 20
-      if (progress >= 100) {
-        clearInterval(uploadInterval)
-        updateProgress(100, "processing")
-
-        // Simulate processing
-        setTimeout(() => {
-          updateProgress(100, "completed")
-        }, 2000)
-      } else {
-        updateProgress(progress)
-      }
-    }, 200)
-  }
+    [onDocumentsChange]
+  );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragActive(true)
-  }, [])
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(true);
+  }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragActive(false)
-  }, [])
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setIsDragActive(false)
-      handleFiles(e.dataTransfer.files)
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragActive(false);
+      handleFiles(e.dataTransfer.files);
     },
-    [handleFiles],
-  )
+    [handleFiles]
+  );
 
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      handleFiles(e.target.files)
+      handleFiles(e.target.files);
     },
-    [handleFiles],
-  )
+    [handleFiles]
+  );
 
   const handleClick = () => {
-    fileInputRef.current?.click()
-  }
+    fileInputRef.current?.click();
+  };
 
   const removeDocument = (docId: string) => {
-    onDocumentsChange(documents.filter((doc) => doc.id !== docId))
-  }
+    // Only allow removal if not processing
+    const doc = documents.find((d) => d.id === docId);
+    if (doc && (doc.status === "processing" || doc.status === "uploading"))
+      return;
+    onDocumentsChange(documents.filter((doc) => doc.id !== docId));
+  };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return "0 Bytes"
-    const k = 1024
-    const sizes = ["Bytes", "KB", "MB", "GB"]
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
-  }
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (
+      Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+    );
+  };
 
   const getStatusIcon = (status: Document["status"]) => {
     switch (status) {
       case "uploading":
       case "processing":
-        return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+        return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
       case "completed":
-        return <CheckCircle className="h-4 w-4 text-green-500" />
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
       case "error":
-        return <AlertCircle className="h-4 w-4 text-red-500" />
+        return <AlertCircle className="h-4 w-4 text-red-500" />;
     }
-  }
+  };
 
   return (
     <div className="space-y-4">
@@ -156,13 +235,18 @@ export function DocumentUpload({ documents, onDocumentsChange }: DocumentUploadP
       <Card
         className={cn(
           "border-2 border-dashed transition-colors cursor-pointer",
-          isDragActive ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" : "border-muted-foreground/25",
+          isDragActive
+            ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20"
+            : "border-muted-foreground/25"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        onClick={handleClick}
+        onClick={uploading ? undefined : handleClick}
+        aria-disabled={uploading}
+        tabIndex={uploading ? -1 : 0}
+        style={uploading ? { pointerEvents: "none", opacity: 0.6 } : {}}
       >
         <CardContent className="p-6">
           <div className="text-center">
@@ -175,8 +259,12 @@ export function DocumentUpload({ documents, onDocumentsChange }: DocumentUploadP
               className="hidden"
             />
             <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-sm text-muted-foreground mb-2">Drag & drop files here, or click to select</p>
-            <p className="text-xs text-muted-foreground">Supports PDF, DOCX, TXT (max 10MB)</p>
+            <p className="text-sm text-muted-foreground mb-2">
+              Drag & drop files here, or click to select
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Supports PDF, DOCX, TXT (max 10MB)
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -193,7 +281,16 @@ export function DocumentUpload({ documents, onDocumentsChange }: DocumentUploadP
                   <p className="text-sm font-medium truncate">{doc.name}</p>
                   <div className="flex items-center space-x-2">
                     {getStatusIcon(doc.status)}
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeDocument(doc.id)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => removeDocument(doc.id)}
+                      disabled={
+                        doc.status === "processing" ||
+                        doc.status === "uploading"
+                      }
+                    >
                       <Trash2 className="h-3 w-3" />
                     </Button>
                   </div>
@@ -206,8 +303,12 @@ export function DocumentUpload({ documents, onDocumentsChange }: DocumentUploadP
                   </Badge>
                 </div>
 
-                {(doc.status === "uploading" || doc.status === "processing") && (
+                {(doc.status === "uploading" ||
+                  doc.status === "processing") && (
                   <Progress value={doc.progress} className="h-1" />
+                )}
+                {doc.status === "error" && doc.error && (
+                  <div className="text-xs text-red-500 mt-1">{doc.error}</div>
                 )}
               </div>
             </div>
@@ -222,5 +323,5 @@ export function DocumentUpload({ documents, onDocumentsChange }: DocumentUploadP
         </div>
       )}
     </div>
-  )
+  );
 }

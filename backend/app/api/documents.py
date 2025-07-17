@@ -56,5 +56,10 @@ async def delete_document(id: str):
     "/{id}/status", response_model=DocumentStatus, summary="Get processing status"
 )
 async def get_document_status(id: str):
-    # Return processing status (pending, processing, done, error)
-    pass
+    processor = DocumentProcessor()
+    progress = processor.get_progress(id)
+    if not progress:
+        raise HTTPException(
+            status_code=404, detail="Document not found or no progress available"
+        )
+    return DocumentStatus(**progress)

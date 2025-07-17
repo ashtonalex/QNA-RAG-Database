@@ -21,8 +21,10 @@ celery_app = Celery(
 # Secure rediss:// support for Upstash
 redis_url = os.environ.get("REDIS_URL")
 if redis_url and redis_url.startswith("rediss://"):
-    celery_app.conf.broker_use_ssl = {"ssl_cert_reqs": ssl.CERT_NONE}
-    celery_app.conf.redis_backend_use_ssl = {"ssl_cert_reqs": ssl.CERT_NONE}
+    import ssl
+
+    celery_app.conf.broker_use_ssl = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
+    celery_app.conf.redis_backend_use_ssl = {"ssl_cert_reqs": ssl.CERT_REQUIRED}
 
 # Import tasks to register them with Celery
 # from app.services.document_processor import test_celery
