@@ -237,3 +237,93 @@ class DocumentProcessor:
             name, ext = os.path.splitext(sanitized)
             sanitized = name[:255] + ext
         return sanitized
+
+    def detect_format(self, filepath: str) -> str:
+        """
+        Detect the file format using python-magic and route to the correct extraction method.
+        Returns the detected MIME type.
+        """
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=400, detail=f"File not found: {filepath}")
+
+        with open(filepath, "rb") as f:
+            header = f.read(2048)
+            mime_type = self.magic_detector.from_buffer(header)
+
+        if mime_type == "application/pdf":
+            return "pdf"
+        elif (
+            mime_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
+            return "docx"
+        elif mime_type == "text/plain":
+            return "txt"
+        else:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported file type: {mime_type}"
+            )
+
+    def extract_text(self, filepath: str) -> str:
+        """
+        Detect format and extract text using the appropriate method.
+        """
+        filetype = self.detect_format(filepath)
+        if filetype == "pdf":
+            return self._extract_pdf(filepath)
+        elif filetype == "docx":
+            return self._extract_docx(filepath)
+        elif filetype == "txt":
+            return self._extract_txt(filepath)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type for extraction: {filetype}",
+            )
+
+    def _extract_pdf(self, filepath: str) -> str:
+        """
+        Extract text from a PDF file using pypdf.
+        """
+        from pypdf import PdfReader
+
+        try:
+            reader = PdfReader(filepath)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            return text
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to extract text from PDF."
+            )
+
+    def _extract_docx(self, filepath: str) -> str:
+        """
+        Extract text from a DOCX file using python-docx.
+        """
+        import docx
+
+        try:
+            doc = docx.Document(filepath)
+            text = "\n".join([para.text for para in doc.paragraphs])
+            return text
+        except Exception as e:
+            logger.error(f"DOCX extraction failed: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to extract text from DOCX."
+            )
+
+    def _extract_txt(self, filepath: str) -> str:
+        """
+        Extract text from a TXT file.
+        """
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"TXT extraction failed: {e}")
+            raise HTTPException(
+                status_code=500, detail="Failed to extract text from TXT."
+            )
