@@ -96,7 +96,7 @@ class ChunkingService:
             grouped = await self.semantic_chunk(chunk)
             semantic_chunks.extend(grouped)
         # Step 3: Overlap logic
-        overlapped_chunks = self.create_overlapping_chunks(semantic_chunks)
+        overlapped_chunks = await self.create_overlapping_chunks(semantic_chunks)
         return overlapped_chunks
 
     def syntactic_chunk(self, text: str, metadata: Dict) -> List[str]:
@@ -170,7 +170,7 @@ class ChunkingService:
         else:
             return max(0.0, (max_tokens - (token_count - max_tokens)) / max_tokens)
 
-    def create_overlapping_chunks(self, chunks: List[str]) -> List[Chunk]:
+    async def create_overlapping_chunks(self, chunks: List[str]) -> List[Chunk]:
         """
         Add overlap between chunks for context preservation.
         Returns a list of Chunk objects with overlap.
@@ -190,7 +190,7 @@ class ChunkingService:
                 )
                 chunk_text = " ".join(overlap_words) + " " + chunk_text
             # Use async token count cache
-            token_count = asyncio.run(self._cached_count_tokens(chunk_text))
+            token_count = await self._cached_count_tokens(chunk_text)
             quality_score = self._score_chunk(token_count)
             chunk = Chunk(
                 id=f"chunk_{i + 1}",
@@ -206,7 +206,43 @@ class ChunkingService:
             overlapped_chunks.append(chunk)
         return overlapped_chunks
 
+    def chunks_to_vector_payloads(self, chunks):
+        """
+        Convert a list of Chunk objects to a list of dicts suitable for vector DB storage.
+        Each dict contains: id, text, metadata, embedding (if present).
+        Example output:
+        [
+            {
+                'id': 'chunk_1',
+                'text': '...',
+                'metadata': {...},
+                'embedding': [...],
+            },
+            ...
+        ]
+        """
+        payloads = []
+        for chunk in chunks:
+            payload = {
+                "id": chunk.id,
+                "text": chunk.text,
+                "metadata": chunk.metadata,
+            }
+            if chunk.embedding is not None:
+                payload["embedding"] = chunk.embedding
+            payloads.append(payload)
+        return payloads
+
     # Additional utility methods (e.g., token counting, quality scoring) can be added here.
+
+
+async def chunk_document(text: str, config: ChunkingConfig, metadata: dict = {}):
+    """
+    Top-level async function to chunk a document using the given config and optional metadata.
+    Returns a list of Chunk objects.
+    """
+    chunker = ChunkingService(config)
+    return await chunker.hybrid_chunk(text, metadata)
 
 
 # Simple test for syntactic_chunk
