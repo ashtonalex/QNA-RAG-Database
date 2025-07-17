@@ -27,13 +27,13 @@ async def test_chunk_document_and_vector_payloads():
 # --- Manual/demo code from main branch ---
 from backend.app.services.chunking_service import ChunkingService
 
+
 sample_text = (
     "Section 1: Introduction. This is the first paragraph. It has two sentences.\n\n"
     "Section 1: Introduction. This is the second paragraph. It also has two sentences.\n\n"
     "Section 2: Methods. A completely unrelated topic starts here. It is about something else entirely.\n\n"
     "Section 3: Results. Back to the original topic. This sentence is similar to the first paragraph."
 )
-
 
 def get_mock_metadata(index):
     if index < 2:
@@ -44,8 +44,10 @@ def get_mock_metadata(index):
         return {"page_number": 3, "section_header": "Results", "order": index + 1}
 
 
+
 config = ChunkingConfig(chunk_size=100)
 chunker = ChunkingService(config)
+
 
 
 def print_chunk_info(chunks):
@@ -58,11 +60,11 @@ def print_chunk_info(chunks):
         print(f"  Relationships: {getattr(chunk, 'relationships', None)}")
         print()
 
-
 if __name__ == "__main__":
     print("Testing Syntactic Chunking:")
     syntactic_chunks = chunker.syntactic_chunk(sample_text, metadata={})
     for i, chunk_text in enumerate(syntactic_chunks):
+
         print(f"Syntactic Chunk {i + 1}: {chunk_text}")
     print()
 
@@ -79,6 +81,7 @@ if __name__ == "__main__":
 
     print("Testing Hybrid Chunking (with overlap and metadata):")
 
+
     async def test_hybrid():
         # Hybrid chunking returns Chunk objects
         hybrid_chunks = await chunker.hybrid_chunk(sample_text, metadata={})
@@ -88,3 +91,4 @@ if __name__ == "__main__":
         print_chunk_info(hybrid_chunks)
 
     asyncio.run(test_hybrid())
+
