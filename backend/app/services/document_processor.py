@@ -12,7 +12,7 @@ from pathlib import Path
 import aiofiles
 import logging
 import redis
-import ssl
+import inspect
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,7 +73,6 @@ class DocumentProcessor:
         self.redis = redis.Redis.from_url(
             os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             decode_responses=True,
-            ssl_cert_reqs=ssl.CERT_REQUIRED,
         )
 
         logger.info("DocumentProcessor initialized")
@@ -132,6 +131,8 @@ class DocumentProcessor:
                 "tables": None,
                 "hash": file_hash,
             }
+            # Convert None values to empty strings for Redis compatibility
+            metadata = {k: ("" if v is None else v) for k, v in metadata.items()}
             self.redis.hmset(f"doc_meta:{doc_id}", metadata)
             self.redis.sadd("doc_ids", doc_id)
 
@@ -298,8 +299,8 @@ class DocumentProcessor:
         self,
         doc_id: str,
         status: str,
-        progress: float = None,
-        error_message: str = None,
+        progress: Optional[float] = None,
+        error_message: Optional[str] = None,
     ):
         """
         Store or update document processing progress in Redis.
@@ -309,7 +310,7 @@ class DocumentProcessor:
             "status": status,
         }
         if progress is not None:
-            progress_data["progress"] = progress
+            progress_data["progress"] = str(progress)
         if error_message:
             progress_data["error_message"] = error_message
         self.redis.hmset(f"doc_progress:{doc_id}", progress_data)
@@ -318,7 +319,13 @@ class DocumentProcessor:
         """
         Retrieve document processing progress from Redis.
         """
-        data = self.redis.hgetall(f"doc_progress:{doc_id}")
+        data_or_awaitable = self.redis.hgetall(f"doc_progress:{doc_id}")
+        if inspect.isawaitable(data_or_awaitable):
+            import asyncio
+
+            data = asyncio.get_event_loop().run_until_complete(data_or_awaitable)
+        else:
+            data = data_or_awaitable
         if not data:
             return None
         # Convert progress to float if present
@@ -326,114 +333,26 @@ class DocumentProcessor:
             data["progress"] = float(data["progress"])
         return data
 
-    def detect_format(self, filepath: str) -> str:
-        """
-        Detect the file format using python-magic and route to the correct extraction method.
-        Returns the detected MIME type.
-        """
-        if not os.path.exists(filepath):
-            raise HTTPException(status_code=400, detail=f"File not found: {filepath}")
-
-        with open(filepath, "rb") as f:
-            header = f.read(2048)
-            mime_type = self.magic_detector.from_buffer(header)
-
-        if mime_type == "application/pdf":
-            return "pdf"
-        elif (
-            mime_type
-            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ):
-            return "docx"
-        elif mime_type == "text/plain":
-            return "txt"
-        else:
-            raise HTTPException(
-                status_code=400, detail=f"Unsupported file type: {mime_type}"
-            )
-
-    def extract_text(self, filepath: str) -> str:
-        """
-        Detect format and extract text using the appropriate method.
-        """
-        filetype = self.detect_format(filepath)
-        if filetype == "pdf":
-            return self._extract_pdf(filepath)
-        elif filetype == "docx":
-            return self._extract_docx(filepath)
-        elif filetype == "txt":
-            return self._extract_txt(filepath)
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type for extraction: {filetype}",
-            )
-
-    def _extract_pdf(self, filepath: str) -> str:
-        """
-        Extract text from a PDF file using pypdf or OCR if image-based.
-        """
-        from pypdf import PdfReader
-
-        try:
-            # Check if image-based PDF
-            if self.ocr_service.is_image_pdf(filepath):
-                # Convert PDF pages to images
-                images = self.ocr_service.pdf_to_images(filepath)
-                text = ""
-                for image in images:
-                    page_text, _ = self.ocr_service.run_ocr(image)
-                    text += page_text + "\n"
-                return text
-            else:
-                reader = PdfReader(filepath)
-                text = ""
-                for page in reader.pages:
-                    text += page.extract_text() or ""
-                return text
-        except Exception as e:
-            logger.error(f"PDF extraction failed: {e}")
-            raise HTTPException(
-                status_code=500, detail="Failed to extract text from PDF."
-            )
-
-    def _extract_docx(self, filepath: str) -> str:
-        """
-        Extract text from a DOCX file using python-docx.
-        """
-        import docx
-
-        try:
-            doc = docx.Document(filepath)
-            text = "\n".join([para.text for para in doc.paragraphs])
-            return text
-        except Exception as e:
-            logger.error(f"DOCX extraction failed: {e}")
-            raise HTTPException(
-                status_code=500, detail="Failed to extract text from DOCX."
-            )
-
-    def _extract_txt(self, filepath: str) -> str:
-        """
-        Extract text from a TXT file.
-        """
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception as e:
-            logger.error(f"TXT extraction failed: {e}")
-            raise HTTPException(
-                status_code=500, detail="Failed to extract text from TXT."
-            )
-
     def list_documents(self):
         """
         List all document metadata.
         """
-        doc_ids = self.redis.smembers("doc_ids")
+        doc_ids_or_awaitable = self.redis.smembers("doc_ids")
+        if inspect.isawaitable(doc_ids_or_awaitable):
+            import asyncio
+
+            doc_ids = asyncio.get_event_loop().run_until_complete(doc_ids_or_awaitable)
+        else:
+            doc_ids = doc_ids_or_awaitable
         docs = []
         for doc_id in doc_ids:
-            meta = self.redis.hgetall(f"doc_meta:{doc_id}")
+            meta_or_awaitable = self.redis.hgetall(f"doc_meta:{doc_id}")
+            if inspect.isawaitable(meta_or_awaitable):
+                import asyncio
+
+                meta = asyncio.get_event_loop().run_until_complete(meta_or_awaitable)
+            else:
+                meta = meta_or_awaitable
             if meta:
                 # Convert fields to correct types
                 if "size" in meta:
@@ -449,7 +368,13 @@ class DocumentProcessor:
         """
         Get metadata for a specific document.
         """
-        meta = self.redis.hgetall(f"doc_meta:{doc_id}")
+        meta_or_awaitable = self.redis.hgetall(f"doc_meta:{doc_id}")
+        if inspect.isawaitable(meta_or_awaitable):
+            import asyncio
+
+            meta = asyncio.get_event_loop().run_until_complete(meta_or_awaitable)
+        else:
+            meta = meta_or_awaitable
         if not meta:
             return None
         if "size" in meta:
@@ -465,7 +390,13 @@ class DocumentProcessor:
         Delete document file, metadata, and progress.
         """
         # Remove file
-        meta = self.redis.hgetall(f"doc_meta:{doc_id}")
+        meta_or_awaitable = self.redis.hgetall(f"doc_meta:{doc_id}")
+        if inspect.isawaitable(meta_or_awaitable):
+            import asyncio
+
+            meta = asyncio.get_event_loop().run_until_complete(meta_or_awaitable)
+        else:
+            meta = meta_or_awaitable
         if meta and "filename" in meta:
             safe_filename = self._sanitize_filename(meta["filename"])
             filepath = self.upload_dir / f"{doc_id}_{safe_filename}"
