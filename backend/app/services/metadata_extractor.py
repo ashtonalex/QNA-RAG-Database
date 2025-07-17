@@ -14,22 +14,22 @@ class MetadataExtractor:
         """
         Extract file properties: size, creation date, author, etc.
         """
-        pass
+        return {}
 
     def analyze_content(self, text: str) -> dict:
         """
         Analyze content: word count, language, etc.
         """
-        pass
+        return {}
 
     def detect_structure(self, text: str) -> dict:
         """
         Detect structure: headings, tables, etc.
         """
-        pass
+        return {}
 
     def hash_content(self, text: str) -> str:
         """
         Generate unique hash for deduplication.
         """
-        pass
+        return ""
