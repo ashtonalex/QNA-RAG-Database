@@ -2,18 +2,34 @@
 API router for document processing endpoints.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from typing import List
 from app.models.document_models import DocumentMetadata, DocumentStatus
+from app.services.document_processor import DocumentProcessor, logger
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 @router.post("/upload", summary="Upload and process a document")
-async def upload_document(file: UploadFile = File(...)):
-    # Handle file upload, validation, and background processing
-    # Return task ID or document ID
-    pass
+async def upload_document(request: Request, file: UploadFile = File(...)):
+    processor = DocumentProcessor()
+    user_ip = request.client.host if request.client else "unknown"
+    try:
+        doc_id = await processor.handle_upload(file)
+        logger.info(
+            f"AUDIT: User IP {user_ip} uploaded file '{file.filename}' as document ID {doc_id}"
+        )
+        return {"document_id": doc_id}
+    except HTTPException as e:
+        logger.warning(
+            f"AUDIT: Upload failed from IP {user_ip} for file '{file.filename}': {e.detail}"
+        )
+        raise
+    except Exception as e:
+        logger.error(
+            f"AUDIT: Unexpected error from IP {user_ip} for file '{file.filename}': {str(e)}"
+        )
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get(
