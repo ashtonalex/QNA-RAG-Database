@@ -36,20 +36,28 @@ async def upload_document(request: Request, file: UploadFile = File(...)):
     "/", response_model=List[DocumentMetadata], summary="List processed documents"
 )
 async def list_documents():
-    # Return list of processed documents
-    pass
+    processor = DocumentProcessor()
+    docs = processor.list_documents()
+    return [DocumentMetadata(**doc) for doc in docs]
 
 
 @router.get("/{id}", response_model=DocumentMetadata, summary="Get document details")
 async def get_document(id: str):
-    # Return document metadata/details
-    pass
+    processor = DocumentProcessor()
+    meta = processor.get_document_metadata(id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return DocumentMetadata(**meta)
 
 
 @router.delete("/{id}", summary="Remove document")
 async def delete_document(id: str):
-    # Delete document and associated data
-    pass
+    processor = DocumentProcessor()
+    meta = processor.get_document_metadata(id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Document not found")
+    processor.delete_document(id)
+    return {"detail": "Document deleted"}
 
 
 @router.get(
