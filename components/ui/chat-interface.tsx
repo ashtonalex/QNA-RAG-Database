@@ -1,70 +1,73 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useRef, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Send, User, Bot, Loader2 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Send, User, Bot, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-interface Message {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  citations?: Citation[]
-  timestamp: Date
+export interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  citations?: Citation[];
+  timestamp: Date;
 }
 
-interface Citation {
-  id: string
-  document: string
-  page?: number
-  snippet: string
+export interface Citation {
+  id: string;
+  document: string;
+  page?: number;
+  snippet: string;
 }
 
 interface ChatInterfaceProps {
-  messages: Message[]
-  onMessagesChange: (messages: Message[]) => void
-  settings: any
-  onCitationsChange: (citations: Citation[]) => void
+  messages: Message[];
+  onMessagesChange: (messages: Message[]) => void;
+  onCitationsChange: (citations: Citation[]) => void;
 }
 
-export function ChatInterface({ messages, onMessagesChange, settings, onCitationsChange }: ChatInterfaceProps) {
-  const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [streamingMessage, setStreamingMessage] = useState("")
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+export function ChatInterface({
+  messages,
+  onMessagesChange,
+  onCitationsChange,
+}: ChatInterfaceProps) {
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, streamingMessage])
+    scrollToBottom();
+  }, [messages, streamingMessage]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || isLoading) return
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
       content: input.trim(),
       timestamp: new Date(),
-    }
+    };
 
-    onMessagesChange([...messages, userMessage])
-    setInput("")
-    setIsLoading(true)
+    onMessagesChange([...messages, userMessage]);
+    setInput("");
+    setIsLoading(true);
 
     // Simulate streaming response
-    await simulateStreamingResponse(input.trim())
-  }
+    await simulateStreamingResponse(input.trim());
+  };
 
   const simulateStreamingResponse = async (query: string) => {
     const mockResponse = `Based on the uploaded documents, I can provide you with information about "${query}". This is a simulated response that demonstrates the streaming capability of the RAG system.
@@ -77,14 +80,15 @@ The system has analyzed your documents and found relevant information to answer 
 
 3. **Additional Context**: The broader context from the documents provides valuable insights.
 
-This response includes citations from your uploaded documents, which you can see in the Sources panel on the right.`
+This response includes citations from your uploaded documents, which you can see in the Sources panel on the right.`;
 
     const mockCitations: Citation[] = [
       {
         id: "1",
         document: "sample-document.pdf",
         page: 1,
-        snippet: "This is a relevant snippet from the document that supports the answer...",
+        snippet:
+          "This is a relevant snippet from the document that supports the answer...",
       },
       {
         id: "2",
@@ -92,15 +96,15 @@ This response includes citations from your uploaded documents, which you can see
         page: 3,
         snippet: "Additional supporting information from another document...",
       },
-    ]
+    ];
 
-    let currentText = ""
-    const words = mockResponse.split(" ")
+    let currentText = "";
+    const words = mockResponse.split(" ");
 
     for (let i = 0; i < words.length; i++) {
-      currentText += (i > 0 ? " " : "") + words[i]
-      setStreamingMessage(currentText)
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      currentText += (i > 0 ? " " : "") + words[i];
+      setStreamingMessage(currentText);
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     const assistantMessage: Message = {
@@ -109,7 +113,7 @@ This response includes citations from your uploaded documents, which you can see
       content: currentText,
       citations: mockCitations,
       timestamp: new Date(),
-    }
+    };
 
     onMessagesChange([
       ...messages,
@@ -120,19 +124,19 @@ This response includes citations from your uploaded documents, which you can see
         timestamp: new Date(),
       },
       assistantMessage,
-    ])
+    ]);
 
-    onCitationsChange(mockCitations)
-    setStreamingMessage("")
-    setIsLoading(false)
-  }
+    onCitationsChange(mockCitations);
+    setStreamingMessage("");
+    setIsLoading(false);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      handleSubmit(e as any)
+      e.preventDefault();
+      handleSubmit(e as any);
     }
-  }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -141,9 +145,12 @@ This response includes citations from your uploaded documents, which you can see
         {messages.length === 0 && (
           <div className="text-center py-12">
             <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-2">Welcome to the RAG Q&A System</h3>
+            <h3 className="text-lg font-medium text-foreground mb-2">
+              Welcome to the RAG Q&A System
+            </h3>
             <p className="text-muted-foreground max-w-md mx-auto">
-              Upload documents and ask questions to get AI-powered answers with source citations.
+              Upload documents and ask questions to get AI-powered answers with
+              source citations.
             </p>
           </div>
         )}
@@ -151,7 +158,10 @@ This response includes citations from your uploaded documents, which you can see
         {messages.map((message) => (
           <div
             key={message.id}
-            className={cn("flex items-start space-x-3", message.role === "user" ? "justify-end" : "justify-start")}
+            className={cn(
+              "flex items-start space-x-3",
+              message.role === "user" ? "justify-end" : "justify-start"
+            )}
           >
             {message.role === "assistant" && (
               <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
@@ -160,10 +170,17 @@ This response includes citations from your uploaded documents, which you can see
             )}
 
             <Card
-              className={cn("max-w-[80%]", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}
+              className={cn(
+                "max-w-[80%]",
+                message.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card"
+              )}
             >
               <CardContent className="p-3">
-                <div className="prose prose-sm dark:prose-invert max-w-none">{message.content}</div>
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  {message.content}
+                </div>
 
                 {message.citations && message.citations.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-border">
@@ -222,13 +239,23 @@ This response includes citations from your uploaded documents, which you can see
               className="min-h-[60px] max-h-32 resize-none pr-12"
               disabled={isLoading}
             />
-            <div className="absolute bottom-2 right-2 text-xs text-muted-foreground">Ctrl+Enter to send</div>
+            <div className="absolute bottom-2 right-2 text-xs text-muted-foreground">
+              Ctrl+Enter to send
+            </div>
           </div>
-          <Button type="submit" disabled={!input.trim() || isLoading} className="self-end">
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          <Button
+            type="submit"
+            disabled={!input.trim() || isLoading}
+            className="self-end"
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </Button>
         </form>
       </div>
     </div>
-  )
+  );
 }
