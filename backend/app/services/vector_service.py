@@ -1,11 +1,165 @@
+import os
+import asyncio
 import logging
+import hashlib
+import json
+import aioredis
+from dotenv import load_dotenv
 import re
+import requests
 from typing import List
 from sentence_transformers import SentenceTransformer
 
 
 class VectorService:
-    pass
+    _embedding_model_warmed = False
+
+    async def _get_redis(self):
+        if not hasattr(self, "_redis"):
+            load_dotenv()
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            self._redis = await aioredis.from_url(
+                redis_url, encoding="utf-8", decode_responses=True
+            )
+        return self._redis
+
+    async def _cache_get(self, key):
+        redis = await self._get_redis()
+        return await redis.get(key)
+
+    async def _cache_set(self, key, value, expire=3600):
+        redis = await self._get_redis()
+        await redis.set(key, value, ex=expire)
+
+    async def _warm_embedding_model(self):
+        if not self._embedding_model_warmed:
+            # Pre-warm by running a dummy embedding
+            try:
+                await self.generate_embeddings(["warmup"])
+                self._embedding_model_warmed = True
+            except Exception as e:
+                logging.warning(f"Embedding model warmup failed: {e}")
+
+    async def similarity_search(
+        self,
+        query: str,
+        collection_name: str,
+        k: int = 10,
+        metadata_filter: dict = None,
+    ) -> list:
+        """
+        Retrieve top-K most relevant chunks from ChromaDB using vector similarity.
+        Supports optional metadata filters and returns results with relevance scores.
+        """
+        # Generate embedding for the query using Jina API
+        query_embedding = await self.generate_embeddings([query])
+        if query_embedding and query_embedding[0] is not None:
+            query_vec = query_embedding[0]
+        else:
+            return []
+
+        # Get collection
+        collection = await self.create_or_get_collection(collection_name)
+
+        # Build filter
+        chroma_filter = metadata_filter if metadata_filter else None
+
+        # Query ChromaDB
+        results = collection.query(
+            query_embeddings=[query_vec],
+            n_results=k,
+            where=chroma_filter,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        # Format results with relevance scores (lower distance = higher relevance)
+        output = []
+        docs = results.get("documents", [[]])[0]
+        metas = results.get("metadatas", [[]])[0]
+        scores = results.get("distances", [[]])[0]
+        for doc, meta, score in zip(docs, metas, scores):
+            output.append({"text": doc, "metadata": meta, "score": score})
+        return output
+
+    async def generate_embeddings(
+        self, chunks: list, batch_size: int = 32, max_retries: int = 3
+    ) -> list:
+        """
+        Generate embeddings for a list of text chunks using Jina Embeddings v4 API.
+        Uses async batching and caches repeated requests in Redis.
+        """
+        await self._warm_embedding_model()
+        results = [None] * len(chunks)
+        headers = {
+            "Authorization": f"Bearer {self.jina_api_key}",
+            "Content-Type": "application/json",
+        }
+        semaphore = asyncio.Semaphore(8)  # Limit concurrent batches for memory safety
+
+        async def fetch_batch(valid_indices, valid_texts):
+            # Cache key based on hash of texts
+            key = (
+                "jinaemb:"
+                + hashlib.sha256(
+                    json.dumps(valid_texts, sort_keys=True).encode()
+                ).hexdigest()
+            )
+            cached = await self._cache_get(key)
+            if cached:
+                try:
+                    embeddings = json.loads(cached)
+                    for idx, emb in zip(valid_indices, embeddings):
+                        results[idx] = emb
+                    return
+                except Exception:
+                    pass
+            for attempt in range(max_retries):
+                try:
+
+                    def fetch_embeddings():
+                        payload = {"input": list(valid_texts), "model": self.jina_model}
+                        response = requests.post(
+                            self.jina_api_url, headers=headers, json=payload, timeout=30
+                        )
+                        response.raise_for_status()
+                        return response.json()["data"]
+
+                    loop = asyncio.get_event_loop()
+                    embeddings = await loop.run_in_executor(None, fetch_embeddings)
+                    emb_vectors = [emb["embedding"] for emb in embeddings]
+                    for idx, emb in zip(valid_indices, emb_vectors):
+                        results[idx] = emb
+                    await self._cache_set(key, json.dumps(emb_vectors))
+                    break
+                except Exception:
+                    if attempt == max_retries - 1:
+                        for idx in valid_indices:
+                            results[idx] = None
+
+        tasks = []
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start : start + batch_size]
+            indices = list(range(start, start + len(batch)))
+            valid = [
+                (i, t)
+                for i, t in zip(indices, batch)
+                if isinstance(t, str) and t.strip()
+            ]
+            if not valid:
+                continue
+            valid_indices, valid_texts = zip(*valid)
+
+            async def batch_task(valid_indices=valid_indices, valid_texts=valid_texts):
+                async with semaphore:
+                    await fetch_batch(valid_indices, valid_texts)
+
+            tasks.append(batch_task())
+        await asyncio.gather(*tasks)
+        return results
+        # The following code block was removed due to unexpected indentation and being outside any function or class.
+        # If this logic is needed, please place it inside the appropriate method.
+
+        pass
 
 
 # Validation utility for embedding shape and dimensionality
@@ -83,71 +237,58 @@ def validate_embeddings(embeddings: list, expected_dim: int = 768) -> bool:
                     await asyncio.sleep(0.5 * (attempt + 1))
         return results
 
-    async def store_chunks(
-        self, chunks: list, collection_name: str, batch_size: int = 100
-    ):
+    async def similarity_search(
+        self,
+        query: str,
+        collection_name: str,
+        k: int = 10,
+        metadata_filter: dict = None,
+    ) -> list:
         """
-        Batch-inserts chunks (with metadata) into the specified ChromaDB collection.
-        Deduplicates by hash and uses batch writing for high throughput.
+        Retrieve top-K most relevant chunks from ChromaDB using vector similarity.
+        Supports optional metadata filters and returns results with relevance scores.
+        Uses Redis cache for repeated queries and minimizes memory overhead.
         """
-        # Get or create collection
+        # Cache key for query
+        cache_key = f"simsearch:{collection_name}:{hashlib.sha256((query + json.dumps(metadata_filter or {})).encode()).hexdigest()}:{k}"
+        cached = await self._cache_get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
+        # Generate embedding for the query using Jina API
+        query_embedding = await self.generate_embeddings([query])
+        if query_embedding and query_embedding[0] is not None:
+            query_vec = query_embedding[0]
+        else:
+            return []
+
+        # Get collection
         collection = await self.create_or_get_collection(collection_name)
-        # Fetch existing hashes for deduplication
-        existing_hashes = set()
-        try:
-            # ChromaDB: get all hashes in collection (may need to page for large collections)
-            offset = 0
-            limit = 1000
-            while True:
-                results = collection.get(
-                    where={"hash": {"$exists": True}},
-                    limit=limit,
-                    offset=offset,
-                    include=["metadatas"],
-                )
-                if not results or not results.get("metadatas"):
-                    break
-                for meta in results["metadatas"]:
-                    if meta and "hash" in meta:
-                        existing_hashes.add(meta["hash"])
-                if len(results["metadatas"]) < limit:
-                    break
-                offset += limit
-        except Exception:
-            pass  # If collection is empty or get fails, just proceed
 
-        # Prepare new chunks (deduplicate by hash)
-        new_chunks = []
-        new_metadatas = []
-        ids = []
-        for chunk in chunks:
-            text = chunk["text"] if isinstance(chunk, dict) else chunk
-            meta = (
-                chunk["metadata"]
-                if isinstance(chunk, dict) and "metadata" in chunk
-                else {}
-            )
-            chunk_hash = meta.get("hash")
-            if not chunk_hash:
-                import hashlib
+        # Build filter
+        chroma_filter = metadata_filter if metadata_filter else None
 
-                chunk_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-                meta["hash"] = chunk_hash
-            if chunk_hash in existing_hashes:
-                continue  # skip duplicate
-            ids.append(chunk_hash)
-            new_chunks.append(text)
-            new_metadatas.append(meta)
+        # Query ChromaDB (streaming if available)
+        results = collection.query(
+            query_embeddings=[query_vec],
+            n_results=k,
+            where=chroma_filter,
+            include=["documents", "metadatas", "distances"],
+        )
 
-        # Batch insert
-        for i in range(0, len(new_chunks), batch_size):
-            batch_texts = new_chunks[i : i + batch_size]
-            batch_ids = ids[i : i + batch_size]
-            batch_metas = new_metadatas[i : i + batch_size]
-            if batch_texts:
-                collection.add(
-                    documents=batch_texts, metadatas=batch_metas, ids=batch_ids
-                )
+        # Format results with relevance scores (lower distance = higher relevance)
+        output = []
+        docs = results.get("documents", [[]])[0]
+        metas = results.get("metadatas", [[]])[0]
+        scores = results.get("distances", [[]])[0]
+        for doc, meta, score in zip(docs, metas, scores):
+            output.append({"text": doc, "metadata": meta, "score": score})
+        # Cache the result
+        await self._cache_set(cache_key, json.dumps(output))
+        return output
 
     @staticmethod
     def assign_metadata(
