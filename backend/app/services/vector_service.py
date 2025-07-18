@@ -1,9 +1,88 @@
+import logging
 import re
 from typing import List
 from sentence_transformers import SentenceTransformer
 
 
 class VectorService:
+    pass
+
+
+# Validation utility for embedding shape and dimensionality
+def validate_embeddings(embeddings: list, expected_dim: int = 768) -> bool:
+    """
+    Validate that all embeddings are lists of floats with the expected dimensionality.
+    Logs errors or inconsistencies for debugging and analytics.
+    Returns True if all embeddings are valid, False otherwise.
+    """
+    all_valid = True
+    for idx, emb in enumerate(embeddings):
+        if emb is None:
+            logging.error(f"Embedding at index {idx} is None.")
+            all_valid = False
+            continue
+        if not isinstance(emb, list):
+            logging.error(f"Embedding at index {idx} is not a list: {type(emb)}")
+            all_valid = False
+            continue
+        if len(emb) != expected_dim:
+            logging.error(
+                f"Embedding at index {idx} has wrong dimension: {len(emb)} (expected {expected_dim})"
+            )
+            all_valid = False
+            continue
+        if not all(isinstance(x, (float, int)) for x in emb):
+            logging.error(f"Embedding at index {idx} contains non-numeric values.")
+            all_valid = False
+    return all_valid
+
+    async def generate_embeddings(
+        self, chunks: list, batch_size: int = 32, max_retries: int = 3
+    ) -> list:
+        """
+        Generates embeddings for a list of text chunks using jina-embeddings-v2-small-en.
+        Supports batch processing, retries on failure, and handles empty/malformed chunks.
+        Returns a list of embedding vectors (or None for failed chunks).
+        """
+        from jina import JinaEmbeddings
+        import asyncio
+        import logging
+
+        if not hasattr(self, "embedding_model"):
+            self.embedding_model = JinaEmbeddings(
+                model_name="jina-embeddings-v2-small-en"
+            )
+
+        results = [None] * len(chunks)
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start : start + batch_size]
+            indices = list(range(start, start + len(batch)))
+            # Filter out empty/malformed
+            valid = [
+                (i, t)
+                for i, t in zip(indices, batch)
+                if isinstance(t, str) and t.strip()
+            ]
+            if not valid:
+                continue
+            valid_indices, valid_texts = zip(*valid)
+            for attempt in range(max_retries):
+                try:
+                    # JinaEmbeddings is sync, so run in thread pool
+                    loop = asyncio.get_event_loop()
+                    embeddings = await loop.run_in_executor(
+                        None, self.embedding_model.embed, list(valid_texts)
+                    )
+                    for idx, emb in zip(valid_indices, embeddings):
+                        results[idx] = emb
+                    break
+                except Exception as e:
+                    logging.warning(
+                        f"Embedding batch failed (attempt {attempt + 1}): {e}"
+                    )
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        return results
+
     async def store_chunks(
         self, chunks: list, collection_name: str, batch_size: int = 100
     ):
