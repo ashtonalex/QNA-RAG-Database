@@ -1,6 +1,5 @@
 import logging
-import asyncio
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 from .vector_service import VectorService
 
 
