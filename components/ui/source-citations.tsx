@@ -1,48 +1,62 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { FileText, ChevronDown, ChevronRight, ExternalLink } from "lucide-react"
+import { useState } from "react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  FileText,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+} from "lucide-react";
 
 interface Citation {
-  id: string
-  document: string
-  page?: number
-  snippet: string
+  id: string;
+  document: string;
+  page?: number;
+  snippet: string;
 }
 
-interface Document {
-  id: string
-  name: string
-  size: number
-  type: string
-  status: string
+export interface Document {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  status: string;
 }
 
 interface SourceCitationsProps {
-  citations: Citation[]
-  documents: Document[]
+  citations: Citation[];
+  documents: Document[];
 }
 
-export function SourceCitations({ citations, documents }: SourceCitationsProps) {
-  const [expandedCitations, setExpandedCitations] = useState<Set<string>>(new Set())
+export function SourceCitations({
+  citations,
+  documents,
+}: SourceCitationsProps) {
+  const [expandedCitations, setExpandedCitations] = useState<Set<string>>(
+    new Set()
+  );
 
   const toggleCitation = (citationId: string) => {
-    const newExpanded = new Set(expandedCitations)
+    const newExpanded = new Set(expandedCitations);
     if (newExpanded.has(citationId)) {
-      newExpanded.delete(citationId)
+      newExpanded.delete(citationId);
     } else {
-      newExpanded.add(citationId)
+      newExpanded.add(citationId);
     }
-    setExpandedCitations(newExpanded)
-  }
+    setExpandedCitations(newExpanded);
+  };
 
   const getDocumentInfo = (documentName: string) => {
-    return documents.find((doc) => doc.name === documentName)
-  }
+    return documents.find((doc) => doc.name === documentName);
+  };
 
   if (citations.length === 0) {
     return (
@@ -50,17 +64,19 @@ export function SourceCitations({ citations, documents }: SourceCitationsProps) 
         <div className="text-center py-8 text-muted-foreground">
           <FileText className="mx-auto h-12 w-12 mb-2 opacity-50" />
           <p className="text-sm">No sources cited yet</p>
-          <p className="text-xs mt-1">Citations will appear here when you ask questions</p>
+          <p className="text-xs mt-1">
+            Citations will appear here when you ask questions
+          </p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="p-4 space-y-3 max-h-full overflow-y-auto">
       {citations.map((citation, index) => {
-        const isExpanded = expandedCitations.has(citation.id)
-        const documentInfo = getDocumentInfo(citation.document)
+        const isExpanded = expandedCitations.has(citation.id);
+        const documentInfo = getDocumentInfo(citation.document);
 
         return (
           <Card key={citation.id} className="border border-border/50">
@@ -77,8 +93,14 @@ export function SourceCitations({ citations, documents }: SourceCitationsProps) 
                       </Badge>
                       <FileText className="h-4 w-4 text-muted-foreground" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{citation.document}</p>
-                        {citation.page && <p className="text-xs text-muted-foreground">Page {citation.page}</p>}
+                        <p className="text-sm font-medium truncate">
+                          {citation.document}
+                        </p>
+                        {citation.page && (
+                          <p className="text-xs text-muted-foreground">
+                            Page {citation.page}
+                          </p>
+                        )}
                       </div>
                     </div>
                     {isExpanded ? (
@@ -105,12 +127,18 @@ export function SourceCitations({ citations, documents }: SourceCitationsProps) 
 
                     {/* Citation Snippet */}
                     <div className="bg-muted/30 rounded-md p-3">
-                      <p className="text-sm text-foreground leading-relaxed">"{citation.snippet}"</p>
+                      <p className="text-sm text-foreground leading-relaxed">
+                        "{citation.snippet}"
+                      </p>
                     </div>
 
                     {/* Actions */}
                     <div className="flex space-x-2">
-                      <Button variant="outline" size="sm" className="text-xs bg-transparent">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs bg-transparent"
+                      >
                         <ExternalLink className="h-3 w-3 mr-1" />
                         View in Document
                       </Button>
@@ -123,17 +151,17 @@ export function SourceCitations({ citations, documents }: SourceCitationsProps) 
               </CollapsibleContent>
             </Collapsible>
           </Card>
-        )
+        );
       })}
 
       {/* Summary */}
       <div className="mt-4 p-3 bg-muted/20 rounded-md">
         <p className="text-xs text-muted-foreground text-center">
-          {citations.length} source{citations.length !== 1 ? "s" : ""} cited from{" "}
-          {new Set(citations.map((c) => c.document)).size} document
+          {citations.length} source{citations.length !== 1 ? "s" : ""} cited
+          from {new Set(citations.map((c) => c.document)).size} document
           {new Set(citations.map((c) => c.document)).size !== 1 ? "s" : ""}
         </p>
       </div>
     </div>
-  )
+  );
 }

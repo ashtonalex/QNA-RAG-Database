@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import type { SetStateAction } from "react";
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface Document {
+export interface Document {
   id: string;
   name: string;
   size: number;
@@ -27,9 +28,11 @@ interface Document {
   error?: string;
 }
 
-interface DocumentUploadProps {
+export interface DocumentUploadProps {
   documents: Document[];
-  onDocumentsChange: (documents: Document[]) => void;
+  onDocumentsChange: (
+    documents: Document[] | ((prev: Document[]) => Document[])
+  ) => void;
 }
 
 export function DocumentUpload({
@@ -61,13 +64,13 @@ export function DocumentUpload({
   // Poll backend for document status
   const pollStatus = (docId: string) => {
     let pollInterval: NodeJS.Timeout | null = null;
-    const poll = async () => {
+    const poll = async (): Promise<void> => {
       try {
         const res = await fetch(`/api/documents/${docId}/status`);
         if (!res.ok) throw new Error("Status check failed");
         const status = await res.json();
         onDocumentsChange((prev) =>
-          prev.map((doc) =>
+          prev.map((doc: Document) =>
             doc.id === docId
               ? {
                   ...doc,
@@ -90,7 +93,7 @@ export function DocumentUpload({
         }
       } catch (e) {
         onDocumentsChange((prev) =>
-          prev.map((doc) =>
+          prev.map((doc: Document) =>
             doc.id === docId
               ? { ...doc, status: "error", error: "Failed to poll status" }
               : doc
@@ -121,7 +124,7 @@ export function DocumentUpload({
       validFiles.forEach(async (file) => {
         // Add to UI as uploading
         const tempId = Math.random().toString(36).substr(2, 9);
-        onDocumentsChange((docs) => [
+        onDocumentsChange((docs: Document[]) => [
           ...docs,
           {
             id: tempId,
@@ -136,7 +139,7 @@ export function DocumentUpload({
           const docId = await uploadFile(file);
           // Replace temp doc with real docId
           onDocumentsChange((docs) =>
-            docs.map((doc) =>
+            docs.map((doc: Document) =>
               doc.id === tempId
                 ? { ...doc, id: docId, status: "processing", progress: 0 }
                 : doc
@@ -145,7 +148,7 @@ export function DocumentUpload({
           pollStatus(docId);
         } catch (e: any) {
           onDocumentsChange((docs) =>
-            docs.map((doc) =>
+            docs.map((doc: Document) =>
               doc.id === tempId
                 ? {
                     ...doc,
@@ -201,10 +204,10 @@ export function DocumentUpload({
 
   const removeDocument = (docId: string) => {
     // Only allow removal if not processing
-    const doc = documents.find((d) => d.id === docId);
+    const doc = documents.find((d: Document) => d.id === docId);
     if (doc && (doc.status === "processing" || doc.status === "uploading"))
       return;
-    onDocumentsChange(documents.filter((doc) => doc.id !== docId));
+    onDocumentsChange(documents.filter((doc: Document) => doc.id !== docId));
   };
 
   const formatFileSize = (bytes: number) => {
@@ -271,7 +274,7 @@ export function DocumentUpload({
 
       {/* Document List */}
       <div className="space-y-2 max-h-96 overflow-y-auto">
-        {documents.map((doc) => (
+        {documents.map((doc: Document) => (
           <Card key={doc.id} className="p-3">
             <div className="flex items-center space-x-3">
               <File className="h-8 w-8 text-muted-foreground flex-shrink-0" />
