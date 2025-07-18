@@ -87,3 +87,62 @@ class RAGService:
                 seen.add(chunk_id)
                 deduped.append(r)
         return deduped
+
+    async def build_context(
+        self,
+        candidates: list,
+        max_tokens: int = 4000,
+        tokenizer=None,
+    ) -> str:
+        """
+        Build a context window from reranked candidates, fitting within max_tokens.
+        Includes highest-ranked, deduplicated, and logically ordered chunks.
+        """
+        # Use a default tokenizer if not provided
+        if tokenizer is None:
+            try:
+                from transformers import AutoTokenizer
+
+                tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+            except ImportError:
+
+                def tokenizer(text):
+                    return text.split()
+
+                tokenizer = type(
+                    "DummyTokenizer", (), {"encode": staticmethod(lambda x: x.split())}
+                )()
+
+        # Deduplicate by chunk hash/id
+        seen = set()
+        deduped = []
+        for c in candidates:
+            meta = c.get("metadata", {})
+            chunk_id = meta.get("hash") or meta.get("chunk_id")
+            if chunk_id and chunk_id not in seen:
+                seen.add(chunk_id)
+                deduped.append(c)
+
+        # Sort by source location if available, else by score
+        def sort_key(c):
+            meta = c.get("metadata", {})
+            return (
+                meta.get("doc_id", ""),
+                meta.get("page_number", 0),
+                meta.get("section_title", ""),
+                c.get("score", float("inf")),
+            )
+
+        ordered = sorted(deduped, key=sort_key)
+
+        # Add chunks until token limit is reached
+        context_chunks = []
+        total_tokens = 0
+        for c in ordered:
+            chunk_text = c.get("text", "")
+            tokens = tokenizer.encode(chunk_text)
+            if total_tokens + len(tokens) > max_tokens:
+                break
+            context_chunks.append(chunk_text)
+            total_tokens += len(tokens)
+        return "\n\n".join(context_chunks)
