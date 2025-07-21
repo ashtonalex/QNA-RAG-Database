@@ -14,6 +14,7 @@ from backend.app.services.document_processor import DocumentProcessor
 from sentence_transformers import SentenceTransformer
 import chromadb
 from unittest.mock import patch
+import tracemalloc
 
 TEST_COLLECTION = "test_collection_pipeline"
 LOG_FILE = "vector_pipeline_test_output.log"
@@ -283,3 +284,61 @@ async def test_chromadb_storage_failure_logs_and_handles():
         else:
             pytest.fail("ChromaDB storage failure was not raised as expected.")
     log_step("[SUCCESS] ChromaDB storage failure simulation test completed.")
+
+@pytest.mark.asyncio
+async def test_redis_unavailable_logs_and_handles():
+    clear_log()
+    service = VectorService()
+    text = "This is a test for Redis unavailability."
+    doc_id = "doc_redis_fail"
+    section_title = "Redis Fail Section"
+    page_number = 1
+    log_step("[START] Redis unavailability simulation test...")
+    chunks = await service.semantic_chunk(text)
+    # Patch the _get_redis method to raise an exception
+    with patch.object(VectorService, "_get_redis", side_effect=Exception("Simulated Redis unavailable")):
+        try:
+            await service.store_chunks(chunks, TEST_COLLECTION, doc_id, section_title, page_number)
+        except Exception as e:
+            log_step(f"[FAILURE] Redis unavailable caught: {e}")
+            assert "Simulated Redis unavailable" in str(e)
+        else:
+            pytest.fail("Redis unavailability was not raised as expected.")
+    log_step("[SUCCESS] Redis unavailability simulation test completed.")
+
+@pytest.mark.asyncio
+async def test_memory_usage_during_large_pipeline():
+    clear_log()
+    service = VectorService()
+    text = " ".join(["Sentence."] * 20000)  # Very large document
+    doc_id = "doc_memory"
+    section_title = "Memory Section"
+    page_number = 1
+    log_step("[START] Memory usage test for large pipeline...")
+
+    tracemalloc.start()
+    start_snapshot = tracemalloc.take_snapshot()
+
+    chunks = await service.semantic_chunk(text)
+    await service.store_chunks(chunks, TEST_COLLECTION, doc_id, section_title, page_number)
+
+    end_snapshot = tracemalloc.take_snapshot()
+    tracemalloc.stop()
+
+    # Calculate memory difference
+    stats = end_snapshot.compare_to(start_snapshot, 'lineno')
+    total_mem_diff = sum([stat.size_diff for stat in stats])
+    log_step(f"[MEMORY] Total memory diff during pipeline: {total_mem_diff / 1024:.2f} KB")
+
+    # Assert that memory usage did not grow by more than 100MB (arbitrary threshold)
+    assert total_mem_diff < 100 * 1024 * 1024, "Memory usage grew by more than 100MB, possible leak!"
+
+    try:
+        service.client.delete_collection(TEST_COLLECTION)
+    except Exception as e:
+        if hasattr(chromadb.errors, "NotFoundError") and isinstance(e, chromadb.errors.NotFoundError):
+            pass
+        else:
+            raise
+
+    log_step("[SUCCESS] Memory usage test completed.")
