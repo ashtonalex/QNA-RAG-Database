@@ -1,23 +1,18 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { MainLayout } from "@/components/layout/main-layout"
-import { DocumentUpload } from "@/components/ui/document-upload"
-import { ChatInterface } from "@/components/ui/chat-interface"
-import { SourceCitations } from "@/components/ui/source-citations"
-import { SettingsPanel } from "@/components/ui/settings-panel"
-import { ThemeProvider } from "@/components/theme-provider"
+import { useState } from "react";
+import type { Document } from "@/components/ui/document-upload";
+import type { Message, Citation } from "@/components/ui/chat-interface";
+import { MainLayout } from "@/components/layout/main-layout";
+import { DocumentUpload } from "@/components/ui/document-upload";
+import { ChatInterface } from "@/components/ui/chat-interface";
+import { SourceCitations } from "@/components/ui/source-citations";
+import { ThemeProvider } from "@/components/theme-provider";
 
 export default function RAGSystem() {
-  const [documents, setDocuments] = useState([])
-  const [messages, setMessages] = useState([])
-  const [settings, setSettings] = useState({
-    model: "gpt-4",
-    temperature: 0.7,
-    maxTokens: 2000,
-    chunkSize: 500,
-  })
-  const [citations, setCitations] = useState([])
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [citations, setCitations] = useState<Citation[]>([]);
 
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -26,11 +21,15 @@ export default function RAGSystem() {
           {/* Left Sidebar - Document Management */}
           <div className="w-80 border-r border-border bg-card/50 backdrop-blur-sm">
             <div className="p-4 border-b border-border">
-              <h2 className="text-lg font-semibold text-foreground">Documents</h2>
+              <h2 className="text-lg font-semibold text-foreground">
+                Documents
+              </h2>
             </div>
             <div className="p-4 space-y-4">
-              <DocumentUpload documents={documents} onDocumentsChange={setDocuments} />
-              <SettingsPanel settings={settings} onSettingsChange={setSettings} />
+              <DocumentUpload
+                documents={documents}
+                onDocumentsChange={setDocuments}
+              />
             </div>
           </div>
 
@@ -39,7 +38,6 @@ export default function RAGSystem() {
             <ChatInterface
               messages={messages}
               onMessagesChange={setMessages}
-              settings={settings}
               onCitationsChange={setCitations}
             />
           </div>
@@ -54,5 +52,5 @@ export default function RAGSystem() {
         </div>
       </MainLayout>
     </ThemeProvider>
-  )
+  );
 }
