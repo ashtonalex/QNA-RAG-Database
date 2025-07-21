@@ -22,6 +22,7 @@ class RAGService:
         Falls back to original query on API failure.
         """
         if not self.api_key:
+            logging.warning("No OpenRouter API key found. Returning original query.")
             return query
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -48,7 +49,10 @@ class RAGService:
                     if resp.status == 200:
                         data = await resp.json()
                         rewritten = data["choices"][0]["message"]["content"].strip()
-                        return rewritten or query
+                        if not rewritten:
+                            logging.warning("DeepSeek V3 returned empty response. Using original query.")
+                            return query
+                        return rewritten
                     else:
                         logging.warning(f"OpenRouter API error: {resp.status}")
         except Exception as e:
@@ -66,6 +70,7 @@ class RAGService:
         """
         Retrieve top-K candidates using ChromaDB vector search with optional metadata filtering.
         Deduplicate by chunk_id/hash and rank by similarity.
+        Supports both sentence-transformers and Jina embeddings.
         """
         if vector_service is None:
             from .vector_service import VectorService
@@ -148,13 +153,6 @@ class RAGService:
             context_chunks.append(chunk_text)
             total_tokens += len(tokens)
         return "\n\n".join(context_chunks)
-
-"""
-RAGService: Orchestrates the retrieval-augmented generation pipeline, including retrieval, reranking, and LLM response generation.
-"""
-
-class RAGService:
-    # ...other methods...
 
     def combine_rerank_scores(
         self,
@@ -249,4 +247,4 @@ class RAGService:
                 answer = data["choices"][0]["message"]["content"]
             return answer
 
-    # ...other methods...
+    # ...other
