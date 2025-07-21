@@ -22,7 +22,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r backend/requirements.txt
-        pip install pytest pytest-asyncio sentence-transformers chromadb pdf2image opencv-python
+        pip install pytest pytest-asyncio sentence-transformers chromadb pdf2image opencv-python aiofiles
 
     - name: Download NLTK punkt
       run: |
