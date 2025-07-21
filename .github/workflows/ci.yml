@@ -24,9 +24,9 @@ jobs:
         pip install -r backend/requirements.txt
         pip install pytest pytest-asyncio sentence-transformers chromadb pdf2image opencv-python aiofiles
 
-    - name: Download NLTK punkt
+    - name: Download NLTK punkt and punkt_tab
       run: |
-        python -c "import nltk; nltk.download('punkt')"
+        python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
     - name: Start Redis
       uses: supercharge/redis-github-action@1.8.0
