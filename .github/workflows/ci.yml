@@ -1,0 +1,41 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ main, master, phase-4-yj ]
+  pull_request:
+    branches: [ main, master, phase-4-yj ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        pip install pytest pytest-asyncio sentence-transformers chromadb pdf2image opencv-python
+
+    - name: Download NLTK punkt
+      run: |
+        python -c "import nltk; nltk.download('punkt')"
+
+    - name: Run tests
+      run: |
+        export PYTHONPATH=.
+        pytest -v tests/test_vector_pipeline.py --maxfail=1 --disable-warnings
+
+    - name: Upload test log
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: vector-pipeline-test-log
+        path: vector_pipeline_test_output.log 
