@@ -35,7 +35,7 @@ jobs:
 
     - name: Upload test log
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: vector-pipeline-test-log
         path: vector_pipeline_test_output.log 
