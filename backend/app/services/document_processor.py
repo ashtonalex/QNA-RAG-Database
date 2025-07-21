@@ -208,7 +208,7 @@ class DocumentProcessor:
             }
             # Convert None values to empty strings for Redis compatibility
             metadata = {k: ("" if v is None else v) for k, v in metadata.items()}
-            self.redis.hmset(f"doc_meta:{doc_id}", metadata)
+            self.redis.hset(f"doc_meta:{doc_id}", mapping=metadata)
             self.redis.sadd("doc_ids", doc_id)
 
             logger.info(
@@ -298,6 +298,10 @@ class DocumentProcessor:
         # Get expected MIME type from extension
         expected_mime = EXTENSION_MAPPING[file_ext]
 
+        # Patch: Allow .docx files detected as application/octet-stream
+        if expected_mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" and detected_mime == "application/octet-stream":
+            detected_mime = expected_mime
+
         # Validate magic numbers
         if not self._check_magic_numbers(content, expected_mime):
             raise HTTPException(
@@ -327,6 +331,17 @@ class DocumentProcessor:
             return False
 
         expected_magic_numbers = SUPPORTED_TYPES[expected_mime]
+
+        # Special case: text/plain should accept files with or without BOM
+        if expected_mime == "text/plain":
+            # Accept if file starts with any known BOM, or if it is valid UTF-8/ASCII
+            if any(content.startswith(magic_number) for magic_number in expected_magic_numbers):
+                return True
+            try:
+                content.decode("utf-8")
+                return True
+            except Exception:
+                return False
 
         for magic_number in expected_magic_numbers:
             if content.startswith(magic_number):
@@ -407,7 +422,7 @@ class DocumentProcessor:
             progress_data["progress"] = str(progress)
         if error_message:
             progress_data["error_message"] = error_message
-        self.redis.hmset(f"doc_progress:{doc_id}", progress_data)
+        self.redis.hset(f"doc_progress:{doc_id}", mapping=progress_data)
 
     def get_progress(self, doc_id: str):
         """
@@ -506,7 +521,7 @@ class DocumentProcessor:
         Store the list of chunk dicts in Redis under 'doc_chunks:{doc_id}'.
         Chunks are serialized as strings for persistence.
         """
-        chunk_dicts = [chunk.dict() for chunk in chunks]
+        chunk_dicts = [chunk.model_dump() for chunk in chunks]
         self.redis.delete(f"doc_chunks:{doc_id}")  # Remove any existing
         if chunk_dicts:
             self.redis.rpush(f"doc_chunks:{doc_id}", *[str(cd) for cd in chunk_dicts])
