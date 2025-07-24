@@ -3,6 +3,7 @@ import logging
 import aiohttp
 import requests
 from typing import List, Optional
+import asyncio
 from fastapi import WebSocket
 from backend.app.models.chunk_models import Chunk
 
@@ -14,46 +15,131 @@ class RAGService:
             logging.warning("OPENROUTER_API_KEY not set in environment variables.")
 
     async def enhance_query(
-        self, query: str, system_prompt: Optional[str] = None
+        self, 
+        query: str, 
+        system_prompt: Optional[str] = None,
+        conversation_history: Optional[List] = None,
+        use_context: bool = False
     ) -> str:
         """
         Enhance a user query using DeepSeek V3 via OpenRouter API.
-        Supports synonym substitution, typo correction, and normalization.
-        Falls back to original query on API failure.
+        
+        Phase 1: Moderate enhancement (typo correction, synonym expansion, grammar improvement)
+        Phase 2: Future context-awareness using conversation history
+        
+        Args:
+            query: The user's original query
+            system_prompt: Custom system prompt (optional)
+            conversation_history: Previous conversation turns for context (future feature)
+            use_context: Whether to use conversation history (future feature)
+            
+        Returns:
+            Enhanced query string, falls back to original on API failure
         """
         if not self.api_key:
+            logging.warning("OPENROUTER_API_KEY not available, returning original query")
             return query
+            
+        # Validate input
+        if not query or not query.strip():
+            return query
+            
+        # Use improved system prompt for moderate enhancement
+        if not system_prompt:
+            system_prompt = self._get_moderate_enhancement_prompt()
+            
+        # Future: Add context-awareness when use_context=True
+        if use_context and conversation_history:
+            system_prompt = self._get_context_aware_prompt(conversation_history)
+            
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        
         payload = {
             "model": "deepseek-chat-v3.0",
             "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                    or "Rewrite the user query for search: correct typos, expand synonyms, normalize, but preserve intent.",
-                },
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": query},
             ],
-            "max_tokens": 64,
-            "temperature": 0.2,
+            "max_tokens": 128,  # Increased for better enhancement
+            "temperature": 0.1,  # Lower for more consistent results
         }
+        
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    self.api_url, headers=headers, json=payload, timeout=10
+                    self.api_url, headers=headers, json=payload, timeout=15
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        rewritten = data["choices"][0]["message"]["content"].strip()
-                        return rewritten or query
+                        if "choices" in data and len(data["choices"]) > 0:
+                            rewritten = data["choices"][0]["message"]["content"].strip()
+                            # Validate that enhancement is reasonable
+                            if rewritten and len(rewritten) <= len(query) * 3:  # Prevent excessive expansion
+                                logging.info(f"Query enhanced: '{query}' -> '{rewritten}'")
+                                return rewritten
+                            else:
+                                logging.warning("Enhanced query seems unreasonable, using original")
+                                return query
+                        else:
+                            logging.warning("Invalid API response format")
                     else:
-                        logging.warning(f"OpenRouter API error: {resp.status}")
+                        logging.warning(f"OpenRouter API error: {resp.status} - {await resp.text()}")
+        except asyncio.TimeoutError:
+            logging.warning("enhance_query API call timed out")
         except Exception as e:
             logging.warning(f"enhance_query API call failed: {e}")
+            
         return query
+        
+    def _get_moderate_enhancement_prompt(self) -> str:
+        """
+        Get the system prompt for moderate query enhancement.
+        Focuses on improving search effectiveness without adding extra information.
+        """
+        return """You are a query enhancement assistant. Your task is to improve user queries for better search results.
+
+Rules:
+1. Fix typos and grammar errors
+2. Expand common abbreviations (ML -> machine learning, AI -> artificial intelligence)
+3. Add relevant synonyms in parentheses when helpful for search
+4. Improve sentence structure for clarity
+5. NEVER add information not provided by the user
+6. NEVER change the core meaning or intent
+7. Keep the enhanced query concise and focused
+8. If the query is already clear, make minimal changes
+
+Examples:
+- "How does ML work?" -> "How does machine learning (ML) work?"
+- "Car maintainance tips" -> "Car maintenance tips"
+- "Best AI models" -> "Best artificial intelligence (AI) models"
+
+Return only the enhanced query, nothing else."""
+        
+    def _get_context_aware_prompt(self, conversation_history: List) -> str:
+        """
+        Future feature: Get system prompt for context-aware enhancement.
+        Will use conversation history to resolve pronouns and maintain topic continuity.
+        """
+        # TODO: Implement context-aware enhancement in Phase 2
+        context_summary = "\n".join([f"- {turn}" for turn in conversation_history[-3:]])  # Last 3 turns
+        
+        return f"""You are a context-aware query enhancement assistant. Use the conversation history to improve the current query.
+
+Conversation context:
+{context_summary}
+
+Rules:
+1. Use context to resolve pronouns (it, this, that, etc.)
+2. Maintain topic continuity from previous turns
+3. Fix typos, expand abbreviations, add synonyms
+4. NEVER add information not in the user's query or conversation
+5. NEVER change the core meaning or intent
+6. Keep enhanced query concise and search-focused
+
+Return only the enhanced query, nothing else."""
 
     async def retrieve_candidates(
         self,
