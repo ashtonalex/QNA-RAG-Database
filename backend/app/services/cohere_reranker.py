@@ -9,7 +9,7 @@ from typing import List
 from backend.app.models.chunk_models import Chunk
 
 class CohereReranker:
-    def __init__(self, api_key_env: str = "COHERE_API_KEY", max_retries: int = 3, backoff: float = 1.0):
+    def __init__(self, api_key_env: str = "cohere_API_key", max_retries: int = 3, backoff: float = 1.0):
         self.api_key = os.getenv(api_key_env)
         if not self.api_key:
             raise ValueError("Cohere API key not found in environment variable '{}'".format(api_key_env))

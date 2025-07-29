@@ -29,8 +29,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include document API router
+# Include API routers
 app.include_router(documents.router)
+
+# Include RAG pipeline router
+from app.api import rag_pipeline
+app.include_router(rag_pipeline.router)
 
 
 # Startup/shutdown events for resource management
