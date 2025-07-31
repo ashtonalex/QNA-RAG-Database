@@ -3,19 +3,23 @@ Comprehensive system test for the complete RAG pipeline.
 Tests end-to-end functionality from document upload to response generation.
 """
 
+import os
 import pytest
 import asyncio
 from unittest.mock import patch, MagicMock, AsyncMock
+from dotenv import load_dotenv
 from backend.app.services.enhanced_rag_pipeline import EnhancedRAGPipeline, PipelineConfig
 from backend.app.models.chunk_models import Chunk
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class TestRAGSystem:
     """Complete system test for RAG pipeline"""
     
-    @pytest.fixture
-    def pipeline(self):
-        """Enhanced RAG pipeline fixture"""
+    def create_pipeline(self):
+        """Create pipeline with test configuration"""
         config = PipelineConfig(
             max_candidates=10,
             rerank_top_n=5,
@@ -24,11 +28,7 @@ class TestRAGSystem:
         return EnhancedRAGPipeline(config)
     
     @pytest.mark.asyncio
-    @patch.dict('os.environ', {
-        'OPENROUTER_API_KEY': 'test-openrouter-key',
-        'cohere_API_key': 'test-cohere-key'
-    })
-    async def test_complete_rag_system(self, pipeline):
+    async def test_complete_rag_system(self):
         """Test complete RAG system from query to response"""
         
         # Mock data
@@ -49,6 +49,8 @@ class TestRAGSystem:
         ]
         
         expected_response = "Python is a versatile, high-level programming language that emphasizes code readability and simplicity. It supports multiple programming paradigms and is widely used for various applications."
+        
+        pipeline = self.create_pipeline()
         
         # Mock all pipeline components
         with patch.object(pipeline.rag_service, 'enhance_query', return_value=enhanced_query), \
@@ -72,12 +74,10 @@ class TestRAGSystem:
             assert result["pipeline_info"]["reranked_chunks"] > 0
     
     @pytest.mark.asyncio
-    @patch.dict('os.environ', {
-        'OPENROUTER_API_KEY': 'test-openrouter-key',
-        'cohere_API_key': 'test-cohere-key'
-    })
-    async def test_system_error_handling(self, pipeline):
+    async def test_system_error_handling(self):
         """Test system error handling and fallbacks"""
+        
+        pipeline = self.create_pipeline()
         
         # Test with no candidates found
         with patch.object(pipeline.rag_service, 'enhance_query', return_value="enhanced query"), \
@@ -93,20 +93,17 @@ class TestRAGSystem:
             assert result["pipeline_info"]["candidates_found"] == 0
     
     @pytest.mark.asyncio
-    async def test_system_health_check(self, pipeline):
+    async def test_system_health_check(self):
         """Test system health monitoring"""
         
-        with patch.dict('os.environ', {
-            'OPENROUTER_API_KEY': 'test-key',
-            'cohere_API_key': 'test-key'
-        }):
-            health = await pipeline.health_check()
-            
-            assert health["overall_status"] == "healthy"
-            assert "components" in health
-            assert "configuration" in health
-            assert health["components"]["openrouter_api"]["status"] == "ok"
-            assert health["components"]["cohere_api"]["status"] == "ok"
+        pipeline = self.create_pipeline()
+        health = await pipeline.health_check()
+        
+        assert health["overall_status"] == "healthy"
+        assert "components" in health
+        assert "configuration" in health
+        assert health["components"]["openrouter_api"]["status"] == "ok"
+        assert health["components"]["cohere_api"]["status"] == "ok"
     
     def test_pipeline_configuration(self):
         """Test pipeline configuration options"""
