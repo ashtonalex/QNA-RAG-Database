@@ -15,4 +15,7 @@ sentence-transformers
 nltk
 numpy
 scikit-learn
-spacy 
+spacy
+psutil
+aiofiles
+chromadb 

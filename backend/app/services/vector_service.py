@@ -44,16 +44,29 @@ class VectorService:
             except Exception as e:
                 logging.warning(f"Embedding model warmup failed: {e}")
 
+    def _calculate_optimal_batch_size(self, chunk_count: int) -> int:
+        """Calculate optimal batch size based on chunk count"""
+        if chunk_count <= 10:
+            return 8
+        elif chunk_count <= 100:
+            return 16
+        else:
+            return 24  # Reduced from 32 for better memory usage
+
     async def generate_embeddings(
-        self, chunks: list, batch_size: int = 32, max_retries: int = 3
+        self, chunks: list, batch_size: int = None, max_retries: int = 3
     ) -> list:
         """
-        Generate embeddings for a list of text chunks using local jina-embeddings-v2-small-en via sentence-transformers.
-        Uses async batching and caches repeated requests in Redis.
+        Generate embeddings with optimized batch sizing.
         """
         await self._warm_embedding_model()
+        
+        # Optimize batch size if not provided
+        if batch_size is None:
+            batch_size = self._calculate_optimal_batch_size(len(chunks))
+        
         results = [None] * len(chunks)
-        semaphore = asyncio.Semaphore(8)  # Limit concurrent batches for memory safety
+        semaphore = asyncio.Semaphore(max(2, batch_size // 4))  # Dynamic semaphore
 
         async def fetch_batch(valid_indices, valid_texts):
             key = (

@@ -6,16 +6,19 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from typing import List
 from app.models.document_models import DocumentMetadata, DocumentStatus
 from app.services.document_processor import DocumentProcessor, logger
+from app.monitoring import monitor
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 @router.post("/upload", summary="Upload and process a document")
+@monitor.memory_check
 async def upload_document(request: Request, file: UploadFile = File(...)):
     processor = DocumentProcessor()
     user_ip = request.client.host if request.client else "unknown"
     try:
         doc_id = await processor.handle_upload(file)
+        monitor.log_memory_usage(f"upload_complete_{doc_id}")
         logger.info(
             f"AUDIT: User IP {user_ip} uploaded file '{file.filename}' as document ID {doc_id}"
         )
