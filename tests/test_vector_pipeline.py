@@ -9,8 +9,12 @@ import time
 import os
 import tempfile
 from fastapi import UploadFile
-from backend.app.services.vector_service import VectorService
-from backend.app.services.document_processor import DocumentProcessor
+try:
+    from backend.app.services.vector_service import VectorService
+    from backend.app.services.document_processor import DocumentProcessor
+except ImportError:
+    from app.services.vector_service import VectorService
+    from app.services.document_processor import DocumentProcessor
 from sentence_transformers import SentenceTransformer
 import chromadb
 from unittest.mock import patch

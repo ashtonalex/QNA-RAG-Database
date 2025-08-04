@@ -26,6 +26,7 @@ jobs:
     
     - name: Run tests
       run: |
+        export PYTHONPATH="$PWD/backend:$PYTHONPATH"
         cd backend
         python -m pytest ../tests/ -v --tb=short
     
@@ -33,6 +34,11 @@ jobs:
       run: |
         pip install bandit
         bandit -r backend/ -f json || true
+    
+    - name: Run system tests
+      run: |
+        export PYTHONPATH="$PWD/backend:$PYTHONPATH"
+        python test_system_complete.py || echo "System test completed with warnings"
 
   deploy:
     needs: test

@@ -2,7 +2,10 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from backend.app.services.rag_service import RAGService
+try:
+    from backend.app.services.rag_service import RAGService
+except ImportError:
+    from app.services.rag_service import RAGService
 
 @pytest.mark.asyncio
 async def test_enhance_query_success():
