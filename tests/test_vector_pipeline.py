@@ -301,13 +301,22 @@ async def test_redis_unavailable_logs_and_handles():
     chunks = await service.semantic_chunk(text)
     # Patch the _get_redis method to raise an exception
     with patch.object(VectorService, "_get_redis", side_effect=Exception("Simulated Redis unavailable")):
+        # Should complete successfully since Redis errors are handled gracefully
+        await service.store_chunks(chunks, TEST_COLLECTION, doc_id, section_title, page_number)
+        log_step("[SUCCESS] Redis unavailable handled gracefully")
+        
+        # Verify data was still stored despite Redis failure
+        results = await service.similarity_search("Redis unavailability", TEST_COLLECTION, k=1)
+        assert len(results) > 0, "Data should be stored even when Redis is unavailable"
+        
+        # Cleanup
         try:
-            await service.store_chunks(chunks, TEST_COLLECTION, doc_id, section_title, page_number)
+            service.client.delete_collection(TEST_COLLECTION)
         except Exception as e:
-            log_step(f"[FAILURE] Redis unavailable caught: {e}")
-            assert "Simulated Redis unavailable" in str(e)
-        else:
-            pytest.fail("Redis unavailability was not raised as expected.")
+            if hasattr(chromadb.errors, "NotFoundError") and isinstance(e, chromadb.errors.NotFoundError):
+                pass
+            else:
+                raise
     log_step("[SUCCESS] Redis unavailability simulation test completed.")
 
 @pytest.mark.asyncio
