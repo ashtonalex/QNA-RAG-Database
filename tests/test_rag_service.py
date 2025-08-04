@@ -10,9 +10,9 @@ except ImportError:
 
 @pytest.mark.asyncio
 async def test_enhance_query_success():
-    service = RAGService()
-    # Mock the API key to ensure test runs
+    # Mock the API key before initializing service
     with patch.dict('os.environ', {'OPENROUTER_API_KEY': 'test_key'}):
+        service = RAGService()
         mock_response = {
             "choices": [
                 {"message": {"content": "expanded and normalized query"}}
