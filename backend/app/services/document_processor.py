@@ -211,8 +211,11 @@ class DocumentProcessor:
             }
             # Convert None values to empty strings for Redis compatibility
             metadata = {k: ("" if v is None else v) for k, v in metadata.items()}
-            self.redis.hset(f"doc_meta:{doc_id}", mapping=metadata)
-            self.redis.sadd("doc_ids", doc_id)
+            try:
+                self.redis.hset(f"doc_meta:{doc_id}", mapping=metadata)
+                self.redis.sadd("doc_ids", doc_id)
+            except Exception:
+                pass  # Redis unavailable, skip metadata storage
 
             logger.info(
                 f"File uploaded successfully: {doc_id}, type: {detected_type}, size: {len(content)} bytes"
@@ -417,15 +420,18 @@ class DocumentProcessor:
         """
         Store or update document processing progress in Redis.
         """
-        progress_data = {
-            "id": doc_id,
-            "status": status,
-        }
-        if progress is not None:
-            progress_data["progress"] = str(progress)
-        if error_message:
-            progress_data["error_message"] = error_message
-        self.redis.hset(f"doc_progress:{doc_id}", mapping=progress_data)
+        try:
+            progress_data = {
+                "id": doc_id,
+                "status": status,
+            }
+            if progress is not None:
+                progress_data["progress"] = str(progress)
+            if error_message:
+                progress_data["error_message"] = error_message
+            self.redis.hset(f"doc_progress:{doc_id}", mapping=progress_data)
+        except Exception:
+            pass  # Redis unavailable, skip progress tracking
 
     def get_progress(self, doc_id: str):
         """
@@ -524,8 +530,11 @@ class DocumentProcessor:
         Store the list of chunk dicts in Redis under 'doc_chunks:{doc_id}'.
         Chunks are serialized as strings for persistence.
         """
-        chunk_dicts = [chunk.model_dump() for chunk in chunks]
-        self.redis.delete(f"doc_chunks:{doc_id}")  # Remove any existing
-        if chunk_dicts:
-            self.redis.rpush(f"doc_chunks:{doc_id}", *[str(cd) for cd in chunk_dicts])
-        logger.info(f"Stored {len(chunk_dicts)} chunks for doc {doc_id}")
+        try:
+            chunk_dicts = [chunk.model_dump() for chunk in chunks]
+            self.redis.delete(f"doc_chunks:{doc_id}")  # Remove any existing
+            if chunk_dicts:
+                self.redis.rpush(f"doc_chunks:{doc_id}", *[str(cd) for cd in chunk_dicts])
+            logger.info(f"Stored {len(chunk_dicts)} chunks for doc {doc_id}")
+        except Exception:
+            logger.info(f"Redis unavailable, skipped storing {len(chunks)} chunks for doc {doc_id}")
