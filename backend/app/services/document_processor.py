@@ -13,7 +13,10 @@ import aiofiles
 import logging
 import redis
 import inspect
-from backend.app.models.chunk_models import ChunkingConfig
+try:
+    from backend.app.models.chunk_models import ChunkingConfig
+except ImportError:
+    from app.models.chunk_models import ChunkingConfig
 import mimetypes
 import docx
 from pypdf import PdfReader
