@@ -29,12 +29,18 @@ class VectorService:
         return self._redis
 
     async def _cache_get(self, key):
-        redis = await self._get_redis()
-        return await redis.get(key)
+        try:
+            redis = await self._get_redis()
+            return await redis.get(key)
+        except Exception:
+            return None  # Redis unavailable, skip caching
 
     async def _cache_set(self, key, value, expire=3600):
-        redis = await self._get_redis()
-        await redis.set(key, value, ex=expire)
+        try:
+            redis = await self._get_redis()
+            await redis.set(key, value, ex=expire)
+        except Exception:
+            pass  # Redis unavailable, skip caching
 
     async def _warm_embedding_model(self):
         if not self._embedding_model_warmed:
