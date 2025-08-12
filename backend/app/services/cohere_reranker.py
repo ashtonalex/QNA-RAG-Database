@@ -6,7 +6,7 @@ import os
 import requests
 import time
 from typing import List
-from backend.app.models.chunk_models import Chunk
+from app.models.chunk_models import Chunk
 
 class CohereReranker:
     def __init__(self, api_key_env: str = "COHERE_API_KEY", max_retries: int = 3, backoff: float = 1.0):

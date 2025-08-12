@@ -1,5 +1,5 @@
 from typing import List, Dict
-from backend.app.models.chunk_models import Chunk, ChunkingConfig
+from app.models.chunk_models import Chunk, ChunkingConfig
 import nltk
 from nltk.tokenize import sent_tokenize
 from sentence_transformers import SentenceTransformer
@@ -254,7 +254,7 @@ async def chunk_document(text: str, config: ChunkingConfig, metadata: dict = {})
 # Simple test for syntactic_chunk
 if __name__ == "__main__":
     import asyncio
-    from backend.app.models.chunk_models import ChunkingConfig
+    from app.models.chunk_models import ChunkingConfig
 
     sample_text = (
         "This is the first paragraph. It has two sentences.\n\n"

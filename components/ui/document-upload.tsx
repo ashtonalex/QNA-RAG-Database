@@ -33,11 +33,13 @@ export interface DocumentUploadProps {
   onDocumentsChange: (
     documents: Document[] | ((prev: Document[]) => Document[])
   ) => void;
+  isLoading?: boolean;
 }
 
 export function DocumentUpload({
   documents,
   onDocumentsChange,
+  isLoading = false,
 }: DocumentUploadProps) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -49,11 +51,15 @@ export function DocumentUpload({
     formData.append("file", file);
     setUploading(true);
     try {
-      const res = await fetch("/api/documents/upload", {
+      const res = await fetch(`/api/documents/upload`, {
         method: "POST",
         body: formData,
       });
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('Upload error:', errorData);
+        throw new Error(errorData.detail || 'Upload failed');
+      }
       const data = await res.json();
       return data.document_id as string;
     } finally {
@@ -202,12 +208,27 @@ export function DocumentUpload({
     fileInputRef.current?.click();
   };
 
-  const removeDocument = (docId: string) => {
+  const removeDocument = async (docId: string) => {
     // Only allow removal if not processing
     const doc = documents.find((d: Document) => d.id === docId);
     if (doc && (doc.status === "processing" || doc.status === "uploading"))
       return;
-    onDocumentsChange(documents.filter((doc: Document) => doc.id !== docId));
+    
+    try {
+      // Call backend to delete document
+      const res = await fetch(`/api/documents/${docId}`, {
+        method: "DELETE",
+      });
+      
+      if (res.ok) {
+        // Remove from frontend state only after successful backend deletion
+        onDocumentsChange(documents.filter((doc: Document) => doc.id !== docId));
+      } else {
+        console.error('Failed to delete document from backend');
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error);
+    }
   };
 
   const formatFileSize = (bytes: number) => {
@@ -319,10 +340,17 @@ export function DocumentUpload({
         ))}
       </div>
 
-      {documents.length === 0 && (
+      {documents.length === 0 && !isLoading && (
         <div className="text-center py-8 text-muted-foreground">
           <File className="mx-auto h-12 w-12 mb-2 opacity-50" />
           <p className="text-sm">No documents uploaded yet</p>
+        </div>
+      )}
+      
+      {isLoading && (
+        <div className="text-center py-8 text-muted-foreground">
+          <Loader2 className="mx-auto h-8 w-8 mb-2 animate-spin" />
+          <p className="text-sm">Loading documents...</p>
         </div>
       )}
     </div>

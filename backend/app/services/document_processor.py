@@ -4,7 +4,10 @@ Service for document processing: upload handling, format detection, routing, val
 
 import os
 import uuid
-import magic
+try:
+    import magic
+except ImportError:
+    magic = None
 import hashlib
 from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException
@@ -19,7 +22,14 @@ except ImportError:
     from app.models.chunk_models import ChunkingConfig
 import mimetypes
 import docx
-from pypdf import PdfReader
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -93,7 +103,10 @@ class DocumentProcessor:
         self.upload_dir.mkdir(exist_ok=True)
 
         # Initialize magic number detector
-        self.magic_detector = magic.Magic(mime=True)
+        if magic:
+            self.magic_detector = magic.Magic(mime=True)
+        else:
+            self.magic_detector = None
 
         # Initialize OCR service
         from .ocr_service import OCRService
@@ -114,13 +127,51 @@ class DocumentProcessor:
         Supports PDF, DOCX, and TXT. Extend this method to support more types.
         """
         if filetype == "application/pdf":
-            try:
-                reader = PdfReader(filepath)
-                text = "\n".join([page.extract_text() or "" for page in reader.pages])
-                return text
-            except Exception as e:
-                logger.error(f"PDF extraction failed: {e}")
+            # Try multiple PDF extraction methods
+            extracted_text = ""
+            
+            # Method 1: Try pdfplumber (best for complex PDFs)
+            if pdfplumber:
+                try:
+                    with pdfplumber.open(filepath) as pdf:
+                        text_parts = []
+                        for page_num, page in enumerate(pdf.pages):
+                            page_text = page.extract_text() or ""
+                            if page_text.strip():
+                                text_parts.append(page_text.strip())
+                                logger.info(f"pdfplumber: Extracted {len(page_text)} chars from page {page_num + 1}")
+                        
+                        if text_parts:
+                            extracted_text = "\n\n".join(text_parts)
+                            logger.info(f"pdfplumber: Total extracted {len(extracted_text)} characters")
+                            return extracted_text
+                except Exception as e:
+                    logger.warning(f"pdfplumber extraction failed: {e}")
+            
+            # Method 2: Fallback to PyPDF2
+            if PdfReader and not extracted_text:
+                try:
+                    reader = PdfReader(filepath)
+                    text_parts = []
+                    for page_num, page in enumerate(reader.pages):
+                        page_text = page.extract_text() or ""
+                        if page_text.strip():
+                            text_parts.append(page_text.strip())
+                            logger.info(f"PyPDF2: Extracted {len(page_text)} chars from page {page_num + 1}")
+                    
+                    if text_parts:
+                        extracted_text = "\n\n".join(text_parts)
+                        logger.info(f"PyPDF2: Total extracted {len(extracted_text)} characters")
+                        return extracted_text
+                except Exception as e:
+                    logger.warning(f"PyPDF2 extraction failed: {e}")
+            
+            # If all methods fail
+            if not extracted_text:
+                logger.error(f"All PDF extraction methods failed for {filepath}")
                 return ""
+            
+            return extracted_text
         elif (
             filetype
             == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -226,7 +277,7 @@ class DocumentProcessor:
             logger.info(f"Extracted text length: {len(extracted_text)}")
 
             # Chunk the extracted text
-            from backend.app.services.chunking_service import ChunkingService
+            from app.services.chunking_service import ChunkingService
 
             chunker = ChunkingService(chunking_config)
             chunks = await chunker.hybrid_chunk(extracted_text, metadata={})
@@ -299,7 +350,14 @@ class DocumentProcessor:
             )
 
         # Detect MIME type using magic numbers
-        detected_mime = self.magic_detector.from_buffer(content)
+        if self.magic_detector:
+            detected_mime = self.magic_detector.from_buffer(content)
+        else:
+            # Fallback to mimetypes for Windows
+            import mimetypes
+            detected_mime, _ = mimetypes.guess_type(filename)
+            if not detected_mime:
+                detected_mime = expected_mime
 
         # Get expected MIME type from extension
         expected_mime = EXTENSION_MAPPING[file_ext]
@@ -477,8 +535,20 @@ class DocumentProcessor:
                     meta["size"] = int(meta["size"])
                 if "created_at" in meta:
                     from datetime import datetime
-
                     meta["created_at"] = datetime.fromisoformat(meta["created_at"])
+                
+                # Handle empty string fields that should be None or proper types
+                if "word_count" in meta and meta["word_count"] == "":
+                    meta["word_count"] = None
+                if "headings" in meta and meta["headings"] == "":
+                    meta["headings"] = None
+                if "tables" in meta and meta["tables"] == "":
+                    meta["tables"] = None
+                if "author" in meta and meta["author"] == "":
+                    meta["author"] = None
+                if "language" in meta and meta["language"] == "":
+                    meta["language"] = None
+                    
                 docs.append(meta)
         return docs
 
@@ -499,8 +569,20 @@ class DocumentProcessor:
             meta["size"] = int(meta["size"])
         if "created_at" in meta:
             from datetime import datetime
-
             meta["created_at"] = datetime.fromisoformat(meta["created_at"])
+        
+        # Handle empty string fields
+        if "word_count" in meta and meta["word_count"] == "":
+            meta["word_count"] = None
+        if "headings" in meta and meta["headings"] == "":
+            meta["headings"] = None
+        if "tables" in meta and meta["tables"] == "":
+            meta["tables"] = None
+        if "author" in meta and meta["author"] == "":
+            meta["author"] = None
+        if "language" in meta and meta["language"] == "":
+            meta["language"] = None
+            
         return meta
 
     def delete_document(self, doc_id: str):
@@ -520,9 +602,10 @@ class DocumentProcessor:
             filepath = self.upload_dir / f"{doc_id}_{safe_filename}"
             if filepath.exists():
                 filepath.unlink()
-        # Remove metadata and progress
+        # Remove metadata, progress, and chunks
         self.redis.delete(f"doc_meta:{doc_id}")
         self.redis.delete(f"doc_progress:{doc_id}")
+        self.redis.delete(f"doc_chunks:{doc_id}")  # Remove chunks
         self.redis.srem("doc_ids", doc_id)
 
     def _store_chunks(self, doc_id: str, chunks: list) -> None:

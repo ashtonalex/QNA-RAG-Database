@@ -65,68 +65,58 @@ export function ChatInterface({
     setInput("");
     setIsLoading(true);
 
-    // Simulate streaming response
-    await simulateStreamingResponse(input.trim());
+    // Call real RAG API
+    await callRAGAPI(input.trim());
   };
 
-  const simulateStreamingResponse = async (query: string) => {
-    const mockResponse = `Based on the uploaded documents, I can provide you with information about "${query}". This is a simulated response that demonstrates the streaming capability of the RAG system.
-
-The system has analyzed your documents and found relevant information to answer your question. Here are the key points:
-
-1. **Primary Finding**: The documents contain relevant information that directly addresses your query.
-
-2. **Supporting Evidence**: Multiple sources support this conclusion with detailed explanations.
-
-3. **Additional Context**: The broader context from the documents provides valuable insights.
-
-This response includes citations from your uploaded documents, which you can see in the Sources panel on the right.`;
-
-    const mockCitations: Citation[] = [
-      {
-        id: "1",
-        document: "sample-document.pdf",
-        page: 1,
-        snippet:
-          "This is a relevant snippet from the document that supports the answer...",
-      },
-      {
-        id: "2",
-        document: "another-document.docx",
-        page: 3,
-        snippet: "Additional supporting information from another document...",
-      },
-    ];
-
-    let currentText = "";
-    const words = mockResponse.split(" ");
-
-    for (let i = 0; i < words.length; i++) {
-      currentText += (i > 0 ? " " : "") + words[i];
-      setStreamingMessage(currentText);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    const assistantMessage: Message = {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: currentText,
-      citations: mockCitations,
-      timestamp: new Date(),
-    };
-
-    onMessagesChange([
-      ...messages,
-      {
+  const callRAGAPI = async (query: string) => {
+    try {
+      const res = await fetch(`/api/rag/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      
+      if (!res.ok) throw new Error('RAG API failed');
+      const data = await res.json();
+      
+      const assistantMessage: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: data.answer || "No answer found.",
+        citations: data.sources?.map((source: any, index: number) => ({
+          id: index.toString(),
+          document: source.document || "Unknown",
+          page: source.page,
+          snippet: source.text || "",
+        })) || [],
+        timestamp: new Date(),
+      };
+      
+      onMessagesChange([...messages, {
         id: (Date.now() - 1).toString(),
         role: "user",
         content: query,
         timestamp: new Date(),
-      },
-      assistantMessage,
-    ]);
-
-    onCitationsChange(mockCitations);
+      }, assistantMessage]);
+      
+      onCitationsChange(assistantMessage.citations || []);
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: "Sorry, I couldn't process your question. Please make sure you have uploaded documents first.",
+        timestamp: new Date(),
+      };
+      
+      onMessagesChange([...messages, {
+        id: (Date.now() - 1).toString(),
+        role: "user",
+        content: query,
+        timestamp: new Date(),
+      }, errorMessage]);
+    }
+    
     setStreamingMessage("");
     setIsLoading(false);
   };
@@ -171,7 +161,7 @@ This response includes citations from your uploaded documents, which you can see
 
             <Card
               className={cn(
-                "max-w-[80%]",
+                "max-w-[85%] sm:max-w-[80%]",
                 message.role === "user"
                   ? "bg-primary text-primary-foreground"
                   : "bg-card"
@@ -227,7 +217,7 @@ This response includes citations from your uploaded documents, which you can see
       </div>
 
       {/* Input Area */}
-      <div className="border-t border-border bg-card/50 backdrop-blur-sm p-4">
+      <div className="border-t border-border bg-card/50 backdrop-blur-sm p-3 sm:p-4">
         <form onSubmit={handleSubmit} className="flex space-x-2">
           <div className="flex-1 relative">
             <Textarea
@@ -236,17 +226,18 @@ This response includes citations from your uploaded documents, which you can see
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask a question about your documents..."
-              className="min-h-[60px] max-h-32 resize-none pr-12"
+              className="min-h-[50px] sm:min-h-[60px] max-h-32 resize-none pr-12 text-sm sm:text-base"
               disabled={isLoading}
             />
-            <div className="absolute bottom-2 right-2 text-xs text-muted-foreground">
+            <div className="hidden sm:block absolute bottom-2 right-2 text-xs text-muted-foreground">
               Ctrl+Enter to send
             </div>
           </div>
           <Button
             type="submit"
             disabled={!input.trim() || isLoading}
-            className="self-end"
+            className="self-end h-[50px] sm:h-auto"
+            size="sm"
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
